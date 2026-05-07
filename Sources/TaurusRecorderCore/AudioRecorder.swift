@@ -114,6 +114,9 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         if settings.inputMode.capturesMicrophone, #unavailable(macOS 15.0) {
             throw RecorderError.microphoneCaptureUnsupported
         }
+        if settings.inputMode.capturesMicrophone {
+            try await Self.ensureMicrophonePermission()
+        }
 
         let content: SCShareableContent
         do {
@@ -390,10 +393,31 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         }
     }
 
-    private static func mapScreenCaptureError(_ error: any Error) -> RecorderError {
+    private static func ensureMicrophonePermission() async throws {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            if granted {
+                return
+            }
+            throw RecorderError.microphonePermissionNeeded
+        case .denied, .restricted:
+            throw RecorderError.microphonePermissionNeeded
+        @unknown default:
+            throw RecorderError.microphonePermissionNeeded
+        }
+    }
+
+    package static func mapScreenCaptureError(_ error: any Error) -> RecorderError {
         let nsError = error as NSError
         if nsError.domain == SCStreamErrorDomain,
            nsError.code == -3801 || nsError.code == -3803 {
+            return .screenRecordingPermissionNeeded
+        }
+        let message = nsError.localizedDescription.lowercased()
+        if message.contains("tcc") || message.contains("declined") {
             return .screenRecordingPermissionNeeded
         }
         return .captureSetupFailed(error.localizedDescription)

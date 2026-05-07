@@ -189,15 +189,17 @@ struct ContentView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let errorMessage = viewModel.errorMessage {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text(errorMessage)
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Button("Open Settings") {
-                        viewModel.openScreenRecordingSettings()
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(viewModel.permissionIssue?.message ?? errorMessage)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
                     }
+
+                    permissionButtons
                 }
                 .font(.callout)
             }
@@ -217,6 +219,33 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 28)
         .animation(.easeInOut(duration: 0.35), value: viewModel.lastSavedURL)
+    }
+
+    @ViewBuilder
+    private var permissionButtons: some View {
+        if let permissionIssue = viewModel.permissionIssue {
+            HStack(spacing: 8) {
+                if permissionIssue.destinations.contains(.screenRecording) {
+                    Button("Open Screen Settings") {
+                        viewModel.openScreenRecordingSettings()
+                    }
+                }
+                if permissionIssue.destinations.contains(.microphone) {
+                    Button("Open Microphone Settings") {
+                        viewModel.openMicrophoneSettings()
+                    }
+                }
+                Spacer()
+            }
+        } else {
+            HStack {
+                if viewModel.errorMessage != nil {
+                    Button("Open Settings") {
+                        viewModel.openScreenRecordingSettings()
+                    }
+                }
+            }
+        }
     }
 
     private var stateColor: Color {

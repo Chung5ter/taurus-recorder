@@ -36,6 +36,16 @@ struct PendingRecording: Equatable, Sendable {
     }
 }
 
+enum PermissionSettingsDestination: Hashable {
+    case screenRecording
+    case microphone
+}
+
+struct PermissionIssue: Equatable {
+    let message: String
+    let destinations: Set<PermissionSettingsDestination>
+}
+
 @MainActor
 final class RecorderViewModel: ObservableObject {
     @Published var state: RecordingState = .idle
@@ -78,6 +88,7 @@ final class RecorderViewModel: ObservableObject {
     @Published var meterReading: MeterReading = .silence
     @Published var waveformPoints: [WaveformPoint] = []
     @Published var errorMessage: String?
+    @Published var permissionIssue: PermissionIssue?
     @Published var lastSavedURL: URL?
     @Published var recordingHistory: [RecordingHistoryItem] = []
     @Published var pendingRecording: PendingRecording?
@@ -181,9 +192,9 @@ final class RecorderViewModel: ObservableObject {
             do {
                 try await recorder.startMonitoring(captureSettings: captureSettings)
                 errorMessage = nil
+                permissionIssue = nil
             } catch {
-                state = .error(error.localizedDescription)
-                errorMessage = error.localizedDescription
+                present(error)
             }
         }
     }
@@ -326,6 +337,10 @@ final class RecorderViewModel: ObservableObject {
         permissionHelper.openScreenRecordingSettings()
     }
 
+    func openMicrophoneSettings() {
+        permissionHelper.openMicrophoneSettings()
+    }
+
     func applyDefaultsFromSettings() {
         switch state {
         case .idle, .monitoring, .error:
@@ -359,6 +374,7 @@ final class RecorderViewModel: ObservableObject {
 
         do {
             errorMessage = nil
+            permissionIssue = nil
             let destinationURL = try destinationURL(for: pendingRecording)
             isSavingPendingRecording = true
 
@@ -450,6 +466,7 @@ final class RecorderViewModel: ObservableObject {
             activeFormat = outputFormat
             lastSavedURL = nil
             errorMessage = nil
+            permissionIssue = nil
             pendingRecording = nil
             waveformPoints = []
             accumulatedElapsed = 0
@@ -471,15 +488,13 @@ final class RecorderViewModel: ObservableObject {
                     timerTask?.cancel()
                     recordingStartedAt = nil
                     isStartingRecording = false
-                    state = .error(error.localizedDescription)
-                    errorMessage = error.localizedDescription
+                    present(error)
                     try? FileManager.default.removeItem(at: temporaryURL)
                 }
             }
         } catch {
             isStartingRecording = false
-            state = .error(error.localizedDescription)
-            errorMessage = error.localizedDescription
+            present(error)
         }
     }
 
@@ -598,6 +613,7 @@ final class RecorderViewModel: ObservableObject {
         }
         recorder.onError = { [weak self] message in
             Task { @MainActor in
+                self?.permissionIssue = nil
                 self?.errorMessage = message
             }
         }
@@ -618,6 +634,36 @@ final class RecorderViewModel: ObservableObject {
                 self.pendingFileName = pending.suggestedBaseName
                 self.recordingStartedAt = nil
             }
+        }
+    }
+
+    private func present(_ error: any Error) {
+        state = .error(error.localizedDescription)
+        errorMessage = error.localizedDescription
+        permissionIssue = permissionIssue(for: error)
+    }
+
+    private func permissionIssue(for error: any Error) -> PermissionIssue? {
+        guard let recorderError = error as? RecorderError else {
+            return nil
+        }
+
+        switch recorderError {
+        case .screenRecordingPermissionNeeded:
+            var destinations: Set<PermissionSettingsDestination> = [.screenRecording]
+            var message = "Computer audio requires Screen & System Audio Recording permission. Your screenshot shows it may already be enabled; if so, toggle Taurus Recorder off and back on, then quit and reopen the app."
+            if inputMode.capturesMicrophone {
+                destinations.insert(.microphone)
+                message += " Computer + Mic also requires Microphone permission."
+            }
+            return PermissionIssue(message: message, destinations: destinations)
+        case .microphonePermissionNeeded:
+            return PermissionIssue(
+                message: "Mic recording requires Microphone permission for Taurus Recorder.",
+                destinations: [.microphone]
+            )
+        default:
+            return nil
         }
     }
 }

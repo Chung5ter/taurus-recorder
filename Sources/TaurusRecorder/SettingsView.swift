@@ -115,6 +115,9 @@ struct SettingsView: View {
                 Button("Open Screen Recording Settings") {
                     permissionHelper.openScreenRecordingSettings()
                 }
+                Button("Open Microphone Settings") {
+                    permissionHelper.openMicrophoneSettings()
+                }
             }
 
             Spacer()

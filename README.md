@@ -8,7 +8,7 @@ System recording programs for Mac exist, but they always felt somewhat complex b
 
 GitHub: [Chung5ter/taurus-recorder](https://github.com/Chung5ter/taurus-recorder)
 
-DMG download: [v0.2.0 release](https://github.com/Chung5ter/taurus-recorder/releases/tag/v0.2.0)
+DMG download: [v0.2.1 release](https://github.com/Chung5ter/taurus-recorder/releases/tag/v0.2.1)
 
 ## What It Includes
 

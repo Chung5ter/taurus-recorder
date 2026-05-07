@@ -2,6 +2,7 @@ import Foundation
 
 public enum RecorderError: LocalizedError {
     case screenRecordingPermissionNeeded
+    case microphonePermissionNeeded
     case captureSetupFailed(String)
     case microphoneCaptureUnsupported
     case noDisplayAvailable
@@ -13,7 +14,9 @@ public enum RecorderError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .screenRecordingPermissionNeeded:
-            "Screen Recording permission is needed before Taurus Recorder can capture system audio."
+            "Allow Taurus Recorder in Screen & System Audio Recording. If it is already enabled, turn it off and back on, then quit and reopen Taurus Recorder."
+        case .microphonePermissionNeeded:
+            "Allow Taurus Recorder in Microphone to record your mic."
         case .captureSetupFailed(let message):
             "Could not prepare system audio capture: \(message)"
         case .microphoneCaptureUnsupported:

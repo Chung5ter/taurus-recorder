@@ -22,6 +22,8 @@ struct CoreBehaviorTests {
         testRecordingTimelineSubtractsPausedGap()
         testSaveFailureReturnsToMonitoringWhenStreamIsActive()
         testSaveFailureReturnsErrorWhenStreamIsInactive()
+        testScreenCaptureTCCErrorMapsToScreenPermission()
+        testMicrophonePermissionErrorIsActionable()
         print("CoreBehaviorTests passed")
     }
 }
@@ -165,6 +167,27 @@ private func testSaveFailureReturnsErrorWhenStreamIsInactive() {
     )
 
     precondition(state == .error("The recording could not be finalized."))
+}
+
+private func testScreenCaptureTCCErrorMapsToScreenPermission() {
+    let error = NSError(
+        domain: "com.apple.ScreenCaptureKit.SCStreamErrorDomain",
+        code: 0,
+        userInfo: [
+            NSLocalizedDescriptionKey: "The user declined TCCs for application, window, display capture"
+        ]
+    )
+
+    let mapped = AudioRecorder.mapScreenCaptureError(error)
+
+    precondition(mapped.errorDescription?.contains("Screen & System Audio Recording") == true)
+}
+
+private func testMicrophonePermissionErrorIsActionable() {
+    let message = RecorderError.microphonePermissionNeeded.errorDescription ?? ""
+
+    precondition(message.contains("Microphone"))
+    precondition(message.contains("Taurus Recorder"))
 }
 
 private func expect(_ condition: Bool, _ message: String) throws {
