@@ -9,6 +9,7 @@ BUILD_DIR="$ROOT_DIR/.build"
 MOUNT_DIR="$BUILD_DIR/dmg-mount"
 RW_DMG="$BUILD_DIR/${APP_NAME}.rw.dmg"
 FINAL_DMG="${DMG_PATH:-$DIST_DIR/${APP_NAME}.dmg}"
+BACKGROUND_DIR="$BUILD_DIR/dmg-background"
 
 APP_BUILD_OUTPUT="$("$ROOT_DIR/Scripts/build-app-bundle.sh")"
 APP_DIR="$(printf '%s\n' "$APP_BUILD_OUTPUT" | tail -n 1)"
@@ -19,7 +20,7 @@ if [[ ! -d "$APP_DIR" ]]; then
   exit 1
 fi
 
-rm -rf "$MOUNT_DIR" "$RW_DMG" "$FINAL_DMG"
+rm -rf "$MOUNT_DIR" "$RW_DMG" "$FINAL_DMG" "$BACKGROUND_DIR"
 mkdir -p "$DIST_DIR" "$MOUNT_DIR"
 
 APP_SIZE_KB="$(du -sk "$APP_DIR" | awk '{print $1}')"
@@ -46,6 +47,24 @@ trap cleanup EXIT
 
 cp -R "$APP_DIR" "$MOUNT_DIR/"
 ln -s /Applications "$MOUNT_DIR/Applications"
+mkdir -p "$MOUNT_DIR/.background" "$BACKGROUND_DIR"
+
+cat > "$BACKGROUND_DIR/background.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
+  <defs>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="640" height="420" fill="#f5f5f7"/>
+  <path d="M251 166 H343" fill="none" stroke="#6e6e73" stroke-width="14" stroke-linecap="round" filter="url(#shadow)"/>
+  <path d="M337 132 L394 166 L337 200 Z" fill="#6e6e73" filter="url(#shadow)"/>
+  <text x="320" y="266" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#6e6e73">Drag Taurus Recorder to Applications</text>
+</svg>
+SVG
+
+qlmanage -t -s 640 -o "$BACKGROUND_DIR" "$BACKGROUND_DIR/background.svg" >/dev/null 2>&1
+mv "$BACKGROUND_DIR/background.svg.png" "$MOUNT_DIR/.background/background.png"
 
 osascript <<APPLESCRIPT >/dev/null
 tell application "Finder"
@@ -59,6 +78,7 @@ tell application "Finder"
     set theViewOptions to the icon view options of container window
     set arrangement of theViewOptions to not arranged
     set icon size of theViewOptions to 96
+    set background picture of theViewOptions to POSIX file "$MOUNT_DIR/.background/background.png"
     set position of item "$APP_NAME.app" of container window to {165, 160}
     set position of item "Applications" of container window to {375, 160}
     close
