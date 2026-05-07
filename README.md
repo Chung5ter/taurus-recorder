@@ -4,6 +4,8 @@ Native SwiftUI macOS MVP for recording system audio with ScreenCaptureKit.
 
 GitHub: [Chung5ter/taurus-recorder](https://github.com/Chung5ter/taurus-recorder)
 
+DMG download: [v0.1.0 release](https://github.com/Chung5ter/taurus-recorder/releases/tag/v0.1.0)
+
 ## What It Includes
 
 - System-audio-only capture through `ScreenCaptureKit`.
