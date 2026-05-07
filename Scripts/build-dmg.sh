@@ -91,14 +91,14 @@ let shaft = NSBezierPath()
 shaft.lineWidth = 14
 shaft.lineCapStyle = .round
 shaft.move(to: NSPoint(x: 226, y: 254))
-shaft.line(to: NSPoint(x: 286, y: 254))
+shaft.line(to: NSPoint(x: 262, y: 254))
 shaft.stroke()
 
 NSColor(calibratedRed: 0.431, green: 0.431, blue: 0.451, alpha: 1).setFill()
 let arrowHead = NSBezierPath()
-arrowHead.move(to: NSPoint(x: 286, y: 286))
-arrowHead.line(to: NSPoint(x: 332, y: 254))
-arrowHead.line(to: NSPoint(x: 286, y: 222))
+arrowHead.move(to: NSPoint(x: 262, y: 286))
+arrowHead.line(to: NSPoint(x: 304, y: 254))
+arrowHead.line(to: NSPoint(x: 262, y: 222))
 arrowHead.close()
 arrowHead.fill()
 
