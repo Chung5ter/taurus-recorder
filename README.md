@@ -2,6 +2,10 @@
 
 Native SwiftUI macOS app for recording system audio with ScreenCaptureKit.
 
+System recording programs for Mac exist, but they always felt somewhat complex because they had such rich features. This program is extremely bare bones for super simple use.
+
+Mac용 시스템 녹음 프로그램은 이미 있지만, 기능이 워낙 많다 보니 항상 조금 복잡하게 느껴졌습니다. 이 프로그램은 아주 단순한 사용을 위해 극도로 기본적인 기능만 담았습니다.
+
 GitHub: [Chung5ter/taurus-recorder](https://github.com/Chung5ter/taurus-recorder)
 
 DMG download: [v0.1.0 release](https://github.com/Chung5ter/taurus-recorder/releases/tag/v0.1.0)
