@@ -12,14 +12,15 @@ DMG download: [v0.1.0 release](https://github.com/Chung5ter/taurus-recorder/rele
 
 ## What It Includes
 
-- System-audio-only capture through `ScreenCaptureKit`.
+- Computer audio, microphone audio, or combined computer + microphone capture through `ScreenCaptureKit`.
 - Audio writing through `AVAssetWriter`.
 - Live RMS/peak audio meter before and during recording.
 - Rolling waveform from the same captured audio buffers used for recording.
-- Default Korean filenames like `20260507 새로운 녹음01.m4a`, incremented without overwriting.
-- Save folder selector, post-stop save/delete confirmation, and M4A/MP3/WAV output selector.
+- Input gain control from 1/3x to 3x with a live dB label.
+- Default English filenames like `260507 new recording 01.m4a`, incremented without overwriting.
+- Save folder selector, post-stop save/delete confirmation, M4A/MP3/WAV output selector, and recording source selector.
 - Native Settings panel available from the app menu or `Command + ,`.
-- Plain Screen Recording permission guidance inside the app.
+- Plain Screen Recording and Microphone permission guidance inside the app.
 
 ## Build
 
@@ -49,6 +50,6 @@ swift run CoreBehaviorTests
 
 ## Notes
 
-Taurus Recorder only listens to system audio and does not save screen video. ScreenCaptureKit still requires Screen Recording permission for system audio capture.
+Taurus Recorder does not save screen video. ScreenCaptureKit still requires Screen Recording permission for computer audio capture, and macOS requires Microphone permission when a microphone source is selected. Microphone capture requires macOS 15 or later.
 
 MP3 export uses the system `afconvert` tool plus LAME because `AVAssetWriter` on macOS does not accept MP3 as an output file type. Install LAME with `brew install lame` if MP3 save fails.

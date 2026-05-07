@@ -86,6 +86,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <true/>
     <key>NSAudioCaptureUsageDescription</key>
     <string>Taurus Recorder captures system audio so you can save local recordings.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Taurus Recorder can include microphone audio when you choose a microphone recording source.</string>
 </dict>
 </plist>
 PLIST

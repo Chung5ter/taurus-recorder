@@ -6,34 +6,66 @@ public final class AudioFileWriter: @unchecked Sendable {
     public let outputURL: URL
 
     private let outputFormat: OutputFormat
+    private let expectedSources: Set<CapturedAudioSource>
     private var writer: AVAssetWriter?
-    private var input: AVAssetWriterInput?
+    private var inputs: [CapturedAudioSource: AVAssetWriterInput] = [:]
+    private var pendingFirstBuffers: [CapturedAudioSource: CMSampleBuffer] = [:]
     private var didStartSession = false
     private let lock = NSLock()
 
     public init(outputURL: URL, outputFormat: OutputFormat) {
         self.outputURL = outputURL
         self.outputFormat = outputFormat
+        self.expectedSources = [.computer]
+    }
+
+    init(outputURL: URL, outputFormat: OutputFormat, expectedSources: Set<CapturedAudioSource>) {
+        self.outputURL = outputURL
+        self.outputFormat = outputFormat
+        self.expectedSources = expectedSources.isEmpty ? [.computer] : expectedSources
     }
 
     public func append(_ sampleBuffer: CMSampleBuffer, subtracting timestampOffset: CMTime = .zero) throws {
+        try append(sampleBuffer, source: .computer, subtracting: timestampOffset)
+    }
+
+    func append(
+        _ sampleBuffer: CMSampleBuffer,
+        source: CapturedAudioSource,
+        subtracting timestampOffset: CMTime = .zero
+    ) throws {
         let sampleBuffer = try retimedSampleBuffer(sampleBuffer, subtracting: timestampOffset)
 
         lock.lock()
         defer { lock.unlock() }
 
         if writer == nil {
-            try configureWriter(using: sampleBuffer)
+            pendingFirstBuffers[source] = sampleBuffer
+            guard expectedSources.isSubset(of: Set(pendingFirstBuffers.keys)) else {
+                return
+            }
+
+            try configureWriter(using: pendingFirstBuffers)
+            let buffersToAppend = pendingFirstBuffers
+                .sorted { lhs, rhs in
+                    CMTimeCompare(
+                        CMSampleBufferGetPresentationTimeStamp(lhs.value),
+                        CMSampleBufferGetPresentationTimeStamp(rhs.value)
+                    ) < 0
+                }
+            pendingFirstBuffers.removeAll()
+            for (source, pendingBuffer) in buffersToAppend {
+                try appendUnlocked(pendingBuffer, source: source)
+            }
+            return
         }
 
-        guard let writer, let input else {
+        try appendUnlocked(sampleBuffer, source: source)
+    }
+
+    private func appendUnlocked(_ sampleBuffer: CMSampleBuffer, source: CapturedAudioSource) throws {
+        guard let writer, let input = inputs[source] else {
             throw RecorderError.writerNotReady
-        }
-
-        if !didStartSession {
-            let startTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            writer.startSession(atSourceTime: startTime)
-            didStartSession = true
         }
 
         guard writer.status == .writing else {
@@ -107,23 +139,25 @@ public final class AudioFileWriter: @unchecked Sendable {
     }
 
     public func finish() async throws -> URL {
-        let writerAndInput: (AVAssetWriter, AVAssetWriterInput)? = lock.withLock {
-            guard let writer, let input else {
+        let writerAndInputs: (AVAssetWriter, [AVAssetWriterInput])? = lock.withLock {
+            guard let writer, !inputs.isEmpty else {
                 return nil
             }
-            input.markAsFinished()
-            return (writer, input)
+            let inputs = Array(inputs.values)
+            inputs.forEach { $0.markAsFinished() }
+            return (writer, inputs)
         }
 
-        guard let (writer, _) = writerAndInput else {
-            throw RecorderError.writerFailed("No system audio was captured before stopping.")
+        guard let (writer, _) = writerAndInputs else {
+            throw RecorderError.writerFailed("No audio was captured before stopping.")
         }
 
         await writer.finishWriting()
 
         lock.withLock {
             self.writer = nil
-            self.input = nil
+            self.inputs = [:]
+            self.pendingFirstBuffers = [:]
             self.didStartSession = false
         }
 
@@ -138,46 +172,78 @@ public final class AudioFileWriter: @unchecked Sendable {
         lock.withLock {
             writer?.cancelWriting()
             writer = nil
-            input = nil
+            inputs = [:]
+            pendingFirstBuffers = [:]
             didStartSession = false
         }
         try? FileManager.default.removeItem(at: outputURL)
     }
 
-    private func configureWriter(using sampleBuffer: CMSampleBuffer) throws {
-        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
-              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)?.pointee else {
-            throw RecorderError.unsupportedAudioBuffer
-        }
+    private func configureWriter(using firstBuffers: [CapturedAudioSource: CMSampleBuffer]) throws {
         guard outputFormat != .mp3 else {
             throw RecorderError.writerFailed("MP3 is finalized after recording. Record to a temporary M4A first.")
         }
 
-        let sampleRate = streamDescription.mSampleRate > 0 ? streamDescription.mSampleRate : 48_000
-        let channelCount = max(Int(streamDescription.mChannelsPerFrame), 1)
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: outputFormat.avFileType)
-        let outputSettings = outputFormat.audioSettings(sampleRate: sampleRate, channelCount: channelCount)
-        guard writer.canApply(outputSettings: outputSettings, forMediaType: .audio) else {
-            throw RecorderError.writerFailed("\(outputFormat.rawValue) output is not supported by AVAssetWriter on this Mac.")
-        }
-        let input = AVAssetWriterInput(
-            mediaType: .audio,
-            outputSettings: outputSettings,
-            sourceFormatHint: formatDescription
-        )
-        input.expectsMediaDataInRealTime = true
 
-        guard writer.canAdd(input) else {
-            throw RecorderError.writerFailed("The audio input could not be added for \(outputFormat.rawValue) output.")
+        for source in firstBuffers.keys.sorted() {
+            guard let sampleBuffer = firstBuffers[source],
+                  let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+                  let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)?.pointee else {
+                throw RecorderError.unsupportedAudioBuffer
+            }
+
+            let sampleRate = streamDescription.mSampleRate > 0 ? streamDescription.mSampleRate : 48_000
+            let channelCount = max(Int(streamDescription.mChannelsPerFrame), 1)
+            let outputSettings = outputFormat.audioSettings(sampleRate: sampleRate, channelCount: channelCount)
+            guard writer.canApply(outputSettings: outputSettings, forMediaType: .audio) else {
+                throw RecorderError.writerFailed("\(outputFormat.rawValue) output is not supported by AVAssetWriter on this Mac.")
+            }
+            let input = AVAssetWriterInput(
+                mediaType: .audio,
+                outputSettings: outputSettings,
+                sourceFormatHint: formatDescription
+            )
+            input.expectsMediaDataInRealTime = true
+
+            guard writer.canAdd(input) else {
+                throw RecorderError.writerFailed("The audio input could not be added for \(outputFormat.rawValue) output.")
+            }
+
+            writer.add(input)
+            inputs[source] = input
         }
 
-        writer.add(input)
         guard writer.startWriting() else {
             throw RecorderError.writerFailed(writer.error?.localizedDescription ?? "The audio writer could not start.")
         }
 
+        let startTime = firstBuffers.values
+            .map { CMSampleBufferGetPresentationTimeStamp($0) }
+            .filter(\.isValid)
+            .min { CMTimeCompare($0, $1) < 0 } ?? .zero
+        writer.startSession(atSourceTime: startTime)
+
         self.writer = writer
-        self.input = input
+        self.didStartSession = true
+    }
+}
+
+enum CapturedAudioSource: Comparable, Sendable {
+    case computer
+    case microphone
+}
+
+extension RecordingInputMode {
+    var capturedAudioSources: Set<CapturedAudioSource> {
+        switch self {
+        case .computer:
+            [.computer]
+        case .computerAndMicrophone:
+            [.computer, .microphone]
+        case .microphone:
+            [.microphone]
+        }
     }
 }
 

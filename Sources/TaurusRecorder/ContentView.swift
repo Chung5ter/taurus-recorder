@@ -44,6 +44,12 @@ struct ContentView: View {
         .onChange(of: appSettings.defaultOutputFormat) { _, _ in
             viewModel.applyDefaultsFromSettings()
         }
+        .onChange(of: appSettings.defaultInputMode) { _, _ in
+            viewModel.applyDefaultsFromSettings()
+        }
+        .onChange(of: appSettings.defaultInputGain) { _, _ in
+            viewModel.applyDefaultsFromSettings()
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 viewModel.retryMonitoringIfPermissionWasGranted()
@@ -157,6 +163,20 @@ struct ContentView: View {
                 }
                 .frame(width: 240)
             }
+
+            GridRow {
+                Text("Source")
+                    .foregroundStyle(.secondary)
+                SourceSelector(selection: $viewModel.inputMode)
+                    .frame(width: 300)
+            }
+
+            GridRow {
+                Text("Input Gain")
+                    .foregroundStyle(.secondary)
+                GainSlider(gain: $viewModel.inputGain)
+                    .frame(width: 300)
+            }
         }
         .font(.callout)
     }
@@ -211,6 +231,78 @@ struct ContentView: View {
             .orange
         default:
             .secondary
+        }
+    }
+}
+
+struct SourceSelector: View {
+    @Binding var selection: RecordingInputMode
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(RecordingInputMode.allCases) { mode in
+                Button {
+                    selection = mode
+                } label: {
+                    Text(mode.displayName)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selection == mode ? .white : .primary)
+                .background {
+                    if selection == mode {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.accentColor)
+                    } else {
+                        Color.clear
+                    }
+                }
+
+                if mode != RecordingInputMode.allCases.last {
+                    Divider()
+                        .frame(height: 18)
+                }
+            }
+        }
+        .padding(2)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
+        }
+    }
+}
+
+struct GainSlider: View {
+    @Binding var gain: InputGain
+
+    private var multiplierBinding: Binding<Double> {
+        Binding(
+            get: { Double(gain.multiplier) },
+            set: { gain = InputGain(multiplier: Float($0)) }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("1/3x")
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .leading)
+
+            Slider(
+                value: multiplierBinding,
+                in: Double(InputGain.minimumMultiplier)...Double(InputGain.maximumMultiplier)
+            )
+
+            Text("3x")
+                .foregroundStyle(.secondary)
+                .frame(width: 24, alignment: .trailing)
+
+            Text(gain.decibelLabel)
+                .monospacedDigit()
+                .frame(width: 58, alignment: .trailing)
         }
     }
 }

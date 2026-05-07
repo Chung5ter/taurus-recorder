@@ -7,29 +7,37 @@ struct SettingsView: View {
     @EnvironmentObject private var appSettings: AppSettings
     @State private var draftSaveFolderURL = FileManager.default.homeDirectoryForCurrentUser
     @State private var draftOutputFormat: OutputFormat = .m4a
+    @State private var draftInputMode: RecordingInputMode = .computer
+    @State private var draftInputGain: InputGain = .unity
+    @State private var selectedTab = SettingsTab.general
 
     private let permissionHelper = ScreenCapturePermissionHelper()
 
     private var hasChanges: Bool {
         draftSaveFolderURL != appSettings.defaultSaveFolderURL
             || draftOutputFormat != appSettings.defaultOutputFormat
+            || draftInputMode != appSettings.defaultInputMode
+            || draftInputGain != appSettings.defaultInputGain
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             generalTab
                 .tabItem {
                     Label("General", systemImage: "slider.horizontal.3")
                 }
+                .tag(SettingsTab.general)
 
             aboutTab
                 .tabItem {
                     Label("About", systemImage: "info.circle")
                 }
+                .tag(SettingsTab.about)
         }
         .padding(20)
-        .frame(width: 580, height: 340)
+        .frame(width: 620, height: 430)
         .onAppear {
+            selectedTab = .general
             loadDraftFromSettings()
         }
     }
@@ -39,6 +47,8 @@ struct SettingsView: View {
             Form {
                 Section("Recording Defaults") {
                     FormatSelector(selection: $draftOutputFormat) {}
+                    SourceSelector(selection: $draftInputMode)
+                    GainSlider(gain: $draftInputGain)
 
                     HStack {
                         Text("Save Folder")
@@ -69,7 +79,9 @@ struct SettingsView: View {
                 Button("Save") {
                     appSettings.updateDefaults(
                         saveFolderURL: draftSaveFolderURL,
-                        outputFormat: draftOutputFormat
+                        outputFormat: draftOutputFormat,
+                        inputMode: draftInputMode,
+                        inputGain: draftInputGain
                     )
                     loadDraftFromSettings()
                 }
@@ -97,7 +109,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Permissions")
                     .font(.headline)
-                Text("System audio capture uses macOS Screen Recording permission. Taurus Recorder only listens to system audio and does not save screen video.")
+                Text("Computer audio capture uses macOS Screen Recording permission. Microphone capture uses macOS Microphone permission. Taurus Recorder does not save screen video.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Open Screen Recording Settings") {
@@ -114,6 +126,8 @@ struct SettingsView: View {
     private func loadDraftFromSettings() {
         draftSaveFolderURL = appSettings.defaultSaveFolderURL
         draftOutputFormat = appSettings.defaultOutputFormat
+        draftInputMode = appSettings.defaultInputMode
+        draftInputGain = appSettings.defaultInputGain
     }
 
     private func chooseDraftSaveFolder() {
@@ -127,5 +141,10 @@ struct SettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             draftSaveFolderURL = url
         }
+    }
+
+    private enum SettingsTab: Hashable {
+        case general
+        case about
     }
 }

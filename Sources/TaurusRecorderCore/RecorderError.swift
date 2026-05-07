@@ -3,6 +3,7 @@ import Foundation
 public enum RecorderError: LocalizedError {
     case screenRecordingPermissionNeeded
     case captureSetupFailed(String)
+    case microphoneCaptureUnsupported
     case noDisplayAvailable
     case streamOutputRegistrationFailed(String)
     case unsupportedAudioBuffer
@@ -15,6 +16,8 @@ public enum RecorderError: LocalizedError {
             "Screen Recording permission is needed before Taurus Recorder can capture system audio."
         case .captureSetupFailed(let message):
             "Could not prepare system audio capture: \(message)"
+        case .microphoneCaptureUnsupported:
+            "Microphone recording requires macOS 15 or later."
         case .noDisplayAvailable:
             "No display is available for ScreenCaptureKit audio capture."
         case .streamOutputRegistrationFailed(let message):

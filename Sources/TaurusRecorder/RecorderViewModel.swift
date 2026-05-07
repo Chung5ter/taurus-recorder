@@ -59,6 +59,22 @@ final class RecorderViewModel: ObservableObject {
             }
         }
     }
+    @Published var inputMode: RecordingInputMode = .computer {
+        didSet {
+            if appSettings.defaultInputMode != inputMode {
+                appSettings.defaultInputMode = inputMode
+            }
+            refreshMonitoringForCaptureSettingsChange(oldInputMode: oldValue)
+        }
+    }
+    @Published var inputGain: InputGain = .unity {
+        didSet {
+            if appSettings.defaultInputGain != inputGain {
+                appSettings.defaultInputGain = inputGain
+            }
+            recorder.updateInputGain(inputGain)
+        }
+    }
     @Published var meterReading: MeterReading = .silence
     @Published var waveformPoints: [WaveformPoint] = []
     @Published var errorMessage: String?
@@ -91,6 +107,8 @@ final class RecorderViewModel: ObservableObject {
         self.permissionMessage = permissionHelper.onboardingMessage
         self.saveFolderURL = appSettings.defaultSaveFolderURL
         self.outputFormat = OutputFormat.availableDefault(preferred: appSettings.defaultOutputFormat)
+        self.inputMode = appSettings.defaultInputMode
+        self.inputGain = appSettings.defaultInputGain
         bindRecorder()
         refreshHistory()
     }
@@ -142,7 +160,8 @@ final class RecorderViewModel: ObservableObject {
     }
 
     var meterStatusText: String {
-        meterReading.isSilent ? "No system audio detected" : "System audio detected"
+        let source = inputMode.displayName.lowercased()
+        return meterReading.isSilent ? "No \(source) audio detected" : "\(inputMode.displayName) audio detected"
     }
 
     var defaultPreviewName: String {
@@ -160,7 +179,7 @@ final class RecorderViewModel: ObservableObject {
     func beginMonitoring() {
         Task {
             do {
-                try await recorder.startMonitoring()
+                try await recorder.startMonitoring(captureSettings: captureSettings)
                 errorMessage = nil
             } catch {
                 state = .error(error.localizedDescription)
@@ -322,6 +341,12 @@ final class RecorderViewModel: ObservableObject {
         if outputFormat != availableDefaultFormat {
             outputFormat = availableDefaultFormat
         }
+        if inputMode != appSettings.defaultInputMode {
+            inputMode = appSettings.defaultInputMode
+        }
+        if inputGain != appSettings.defaultInputGain {
+            inputGain = appSettings.defaultInputGain
+        }
     }
 
     func savePendingRecording() {
@@ -436,7 +461,11 @@ final class RecorderViewModel: ObservableObject {
 
             Task {
                 do {
-                    try await recorder.startRecording(outputURL: temporaryURL, format: recordingFormat)
+                    try await recorder.startRecording(
+                        outputURL: temporaryURL,
+                        format: recordingFormat,
+                        captureSettings: captureSettings
+                    )
                     isStartingRecording = false
                 } catch {
                     timerTask?.cancel()
@@ -508,6 +537,22 @@ final class RecorderViewModel: ObservableObject {
             baseName: baseName,
             format: pendingRecording.format
         )
+    }
+
+    private var captureSettings: AudioCaptureSettings {
+        AudioCaptureSettings(inputMode: inputMode, inputGain: inputGain)
+    }
+
+    private func refreshMonitoringForCaptureSettingsChange(oldInputMode: RecordingInputMode) {
+        guard oldInputMode != inputMode else {
+            return
+        }
+        switch state {
+        case .idle, .monitoring, .error:
+            beginMonitoring()
+        case .recording, .paused, .saving:
+            break
+        }
     }
 
     private func clearPendingRecording() {

@@ -7,6 +7,8 @@ struct CoreBehaviorTests {
     static func main() throws {
         try testFileNamingCreatesFirstDefaultName()
         try testFileNamingIncrementsExistingNames()
+        testInputGainUsesThreeTimesRangeAndDecibelLabels()
+        testRecordingInputModeLabels()
         testMeterDetectsSilence()
         testMeterDetectsActiveSignal()
         testMP3FormatIsAvailable()
@@ -30,18 +32,35 @@ private func testFileNamingCreatesFirstDefaultName() throws {
 
     let url = try service.nextAvailableRecordingURL(in: folder.url, format: .m4a)
 
-    try expect(url.lastPathComponent == "20260507 새로운 녹음01.m4a", "default name should start at 01")
+    try expect(url.lastPathComponent == "260507 new recording 01.m4a", "default name should start at 01")
 }
 
 private func testFileNamingIncrementsExistingNames() throws {
     let folder = try TemporaryFolder()
-    try Data().write(to: folder.url.appendingPathComponent("20260507 새로운 녹음01.m4a"))
-    try Data().write(to: folder.url.appendingPathComponent("20260507 새로운 녹음02.m4a"))
+    try Data().write(to: folder.url.appendingPathComponent("260507 new recording 01.m4a"))
+    try Data().write(to: folder.url.appendingPathComponent("260507 new recording 02.m4a"))
     let service = FileNamingService(calendar: fixedCalendar, dateProvider: { fixedDate })
 
     let url = try service.nextAvailableRecordingURL(in: folder.url, format: .m4a)
 
-    try expect(url.lastPathComponent == "20260507 새로운 녹음03.m4a", "default name should increment existing suffixes")
+    try expect(url.lastPathComponent == "260507 new recording 03.m4a", "default name should increment existing suffixes")
+}
+
+private func testInputGainUsesThreeTimesRangeAndDecibelLabels() {
+    precondition(InputGain.minimumMultiplier == Float(1.0 / 3.0))
+    precondition(InputGain.maximumMultiplier == 3)
+    precondition(InputGain(multiplier: 9).multiplier == 3)
+    precondition(InputGain(multiplier: 0.1).multiplier == Float(1.0 / 3.0))
+    precondition(InputGain(multiplier: 1).decibelLabel == "0.0 dB")
+    precondition(InputGain(multiplier: 3).decibelLabel == "+9.5 dB")
+    precondition(InputGain(multiplier: Float(1.0 / 3.0)).decibelLabel == "-9.5 dB")
+}
+
+private func testRecordingInputModeLabels() {
+    precondition(RecordingInputMode.allCases == [.computer, .computerAndMicrophone, .microphone])
+    precondition(RecordingInputMode.computer.displayName == "Computer")
+    precondition(RecordingInputMode.computerAndMicrophone.displayName == "Computer + Mic")
+    precondition(RecordingInputMode.microphone.displayName == "Mic")
 }
 
 private func testMeterDetectsSilence() {

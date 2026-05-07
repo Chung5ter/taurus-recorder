@@ -23,6 +23,8 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     private var meter = AudioMeter()
     private var waveform = WaveformAnalyzer()
     private var recordingTimeline = RecordingTimeline()
+    private var captureSettings = AudioCaptureSettings()
+    private var activeInputMode: RecordingInputMode?
     private var isPaused = false
     private var isStartingRecording = false
     private var monitoringStartTask: Task<Void, any Error>?
@@ -32,7 +34,29 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         super.init()
     }
 
-    public func startMonitoring() async throws {
+    public func updateInputGain(_ inputGain: InputGain) {
+        runtimeLock.withLock {
+            captureSettings.inputGain = inputGain
+        }
+    }
+
+    public func startMonitoring(captureSettings requestedSettings: AudioCaptureSettings = AudioCaptureSettings()) async throws {
+        var streamToRestart: SCStream?
+        runtimeLock.withLock {
+            self.captureSettings = requestedSettings
+            if let stream,
+               writer == nil,
+               activeInputMode != requestedSettings.inputMode {
+                self.stream = nil
+                activeInputMode = nil
+                streamToRestart = stream
+            }
+        }
+
+        if let streamToRestart {
+            try? await stopCapture(streamToRestart)
+        }
+
         var taskToAwait: Task<Void, any Error>?
         var isAlreadyMonitoring = false
         var shouldNotifyMonitoring = false
@@ -86,6 +110,11 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     }
 
     private func startAndStoreStream() async throws {
+        let settings = runtimeLock.withLock { captureSettings }
+        if settings.inputMode.capturesMicrophone, #unavailable(macOS 15.0) {
+            throw RecorderError.microphoneCaptureUnsupported
+        }
+
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.current
@@ -108,7 +137,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             exceptingWindows: []
         )
         let configuration = SCStreamConfiguration()
-        configuration.capturesAudio = true
+        configuration.capturesAudio = settings.inputMode.capturesComputerAudio
         configuration.excludesCurrentProcessAudio = true
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
@@ -116,11 +145,23 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         configuration.height = 2
         configuration.showsCursor = false
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        if settings.inputMode.capturesMicrophone {
+            if #available(macOS 15.0, *) {
+                configuration.captureMicrophone = true
+            }
+        }
 
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
 
         do {
-            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: captureQueue)
+            if settings.inputMode.capturesComputerAudio {
+                try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: captureQueue)
+            }
+            if settings.inputMode.capturesMicrophone {
+                if #available(macOS 15.0, *) {
+                    try stream.addStreamOutput(self, type: .microphone, sampleHandlerQueue: captureQueue)
+                }
+            }
         } catch {
             throw RecorderError.streamOutputRegistrationFailed(error.localizedDescription)
         }
@@ -129,11 +170,20 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         runtimeLock.withLock {
             if self.stream == nil {
                 self.stream = stream
+                self.activeInputMode = settings.inputMode
             }
         }
     }
 
-    public func startRecording(outputURL: URL, format: OutputFormat) async throws {
+    public func startRecording(
+        outputURL: URL,
+        format: OutputFormat,
+        captureSettings requestedSettings: AudioCaptureSettings = AudioCaptureSettings()
+    ) async throws {
+        runtimeLock.withLock {
+            self.captureSettings = requestedSettings
+        }
+
         let needsMonitoring = try runtimeLock.withLock {
             guard !isStartingRecording,
                   writer == nil,
@@ -141,12 +191,12 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
                 throw RecorderError.writerFailed("Recording is already starting or in progress.")
             }
             isStartingRecording = true
-            return stream == nil
+            return stream == nil || activeInputMode != requestedSettings.inputMode
         }
 
         do {
             if needsMonitoring {
-                try await startMonitoring()
+                try await startMonitoring(captureSettings: requestedSettings)
             }
         } catch {
             runtimeLock.withLock {
@@ -156,7 +206,11 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         }
 
         runtimeLock.withLock {
-            writer = AudioFileWriter(outputURL: outputURL, outputFormat: format)
+            writer = AudioFileWriter(
+                outputURL: outputURL,
+                outputFormat: format,
+                expectedSources: requestedSettings.inputMode.capturedAudioSources
+            )
             waveform.reset()
             recordingTimeline.reset()
             isPaused = false
@@ -261,14 +315,19 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         runtimeLock.withLock {
             if self.stream === streamToStop {
                 self.stream = nil
+                self.activeInputMode = nil
             }
         }
         transition(to: .idle)
     }
 
-    private func handle(sampleBuffer: CMSampleBuffer) {
+    private func handle(sampleBuffer: CMSampleBuffer, source: CapturedAudioSource) {
         do {
-            let samples = try AudioSampleExtractor.monoFloatSamples(from: sampleBuffer)
+            let gainedBuffer = try AudioSampleBufferGain.applying(
+                runtimeLock.withLock { captureSettings.inputGain },
+                to: sampleBuffer
+            )
+            let samples = try AudioSampleExtractor.monoFloatSamples(from: gainedBuffer)
             let result = runtimeLock.withLock {
                 let reading = meter.process(samples: samples)
                 var points: [WaveformPoint]?
@@ -283,8 +342,8 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
 
                 let writerToAppend = currentState == .recording && !isPaused ? writer : nil
                 let timestampOffset = writerToAppend == nil ? CMTime.zero : recordingTimeline.offsetForAppendedSample(
-                    presentationTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer),
-                    duration: CMSampleBufferGetDuration(sampleBuffer)
+                    presentationTime: CMSampleBufferGetPresentationTimeStamp(gainedBuffer),
+                    duration: CMSampleBufferGetDuration(gainedBuffer)
                 )
                 return (reading, points, writerToAppend, timestampOffset)
             }
@@ -294,7 +353,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
                 onWaveform?(points)
             }
 
-            try result.2?.append(sampleBuffer, subtracting: result.3)
+            try result.2?.append(gainedBuffer, source: source, subtracting: result.3)
         } catch {
             onError?(error.localizedDescription)
         }
@@ -347,10 +406,17 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
 
 extension AudioRecorder: SCStreamOutput {
     public func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio, sampleBuffer.isValid else {
+        guard sampleBuffer.isValid else {
             return
         }
-        handle(sampleBuffer: sampleBuffer)
+        if type == .audio {
+            handle(sampleBuffer: sampleBuffer, source: .computer)
+            return
+        }
+        if #available(macOS 15.0, *), type == .microphone {
+            handle(sampleBuffer: sampleBuffer, source: .microphone)
+            return
+        }
     }
 }
 
@@ -362,6 +428,7 @@ extension AudioRecorder: SCStreamDelegate {
             }
             let writerToCancel = writer
             self.stream = nil
+            activeInputMode = nil
             writer = nil
             isPaused = false
             isStartingRecording = false
