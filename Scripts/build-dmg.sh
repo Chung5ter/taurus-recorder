@@ -90,30 +90,19 @@ NSColor(calibratedRed: 0.431, green: 0.431, blue: 0.451, alpha: 1).setStroke()
 let shaft = NSBezierPath()
 shaft.lineWidth = 14
 shaft.lineCapStyle = .round
-shaft.move(to: NSPoint(x: 251, y: 254))
-shaft.line(to: NSPoint(x: 343, y: 254))
+shaft.move(to: NSPoint(x: 226, y: 254))
+shaft.line(to: NSPoint(x: 286, y: 254))
 shaft.stroke()
 
 NSColor(calibratedRed: 0.431, green: 0.431, blue: 0.451, alpha: 1).setFill()
 let arrowHead = NSBezierPath()
-arrowHead.move(to: NSPoint(x: 337, y: 288))
-arrowHead.line(to: NSPoint(x: 394, y: 254))
-arrowHead.line(to: NSPoint(x: 337, y: 220))
+arrowHead.move(to: NSPoint(x: 286, y: 286))
+arrowHead.line(to: NSPoint(x: 332, y: 254))
+arrowHead.line(to: NSPoint(x: 286, y: 222))
 arrowHead.close()
 arrowHead.fill()
 
 NSGraphicsContext.restoreGraphicsState()
-
-let message = "Drag Taurus Recorder to Applications"
-let attributes: [NSAttributedString.Key: Any] = [
-    .font: NSFont.systemFont(ofSize: 18, weight: .regular),
-    .foregroundColor: NSColor(calibratedRed: 0.431, green: 0.431, blue: 0.451, alpha: 1)
-]
-let textSize = message.size(withAttributes: attributes)
-message.draw(
-    at: NSPoint(x: (size.width - textSize.width) / 2, y: 135),
-    withAttributes: attributes
-)
 
 NSGraphicsContext.restoreGraphicsState()
 
