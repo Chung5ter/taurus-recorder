@@ -6,7 +6,7 @@ public struct ScreenCapturePermissionHelper {
     public init() {}
 
     public var onboardingMessage: String {
-        "macOS requires Screen Recording permission for system audio capture. Taurus Recorder only listens to system audio for this MVP and does not save screen video."
+        "macOS requires Screen Recording permission for system audio capture. Taurus Recorder only listens to system audio and does not save screen video."
     }
 
     public func openScreenRecordingSettings() {

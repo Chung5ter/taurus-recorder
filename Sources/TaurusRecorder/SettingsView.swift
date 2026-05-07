@@ -84,7 +84,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Taurus Recorder")
                     .font(.title2.weight(.semibold))
-                Text("© \(Calendar.current.component(.year, from: Date())) Jee Hoon Chung (정지훈)")
+                Text("© \(String(Calendar.current.component(.year, from: Date()))) Jee Hoon Chung (정지훈)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Text(permissionHelper.onboardingMessage)
@@ -97,7 +97,7 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Permissions")
                     .font(.headline)
-                Text("System audio capture uses macOS Screen Recording permission. Microphone permission is not used in this MVP.")
+                Text("System audio capture uses macOS Screen Recording permission. Taurus Recorder only listens to system audio and does not save screen video.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Open Screen Recording Settings") {

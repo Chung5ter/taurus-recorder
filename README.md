@@ -1,6 +1,6 @@
 # Taurus Recorder
 
-Native SwiftUI macOS MVP for recording system audio with ScreenCaptureKit.
+Native SwiftUI macOS app for recording system audio with ScreenCaptureKit.
 
 GitHub: [Chung5ter/taurus-recorder](https://github.com/Chung5ter/taurus-recorder)
 
@@ -45,6 +45,6 @@ swift run CoreBehaviorTests
 
 ## Notes
 
-The MVP intentionally does not add a microphone path and does not register a video stream output. ScreenCaptureKit still requires Screen Recording permission for system audio capture.
+Taurus Recorder only listens to system audio and does not save screen video. ScreenCaptureKit still requires Screen Recording permission for system audio capture.
 
 MP3 export uses the system `afconvert` tool plus LAME because `AVAssetWriter` on macOS does not accept MP3 as an output file type. Install LAME with `brew install lame` if MP3 save fails.
