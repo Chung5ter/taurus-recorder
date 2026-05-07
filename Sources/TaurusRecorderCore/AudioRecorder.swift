@@ -27,7 +27,6 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     private var activeInputMode: RecordingInputMode?
     private var isPaused = false
     private var isStartingRecording = false
-    private var monitoringStartTask: Task<Void, any Error>?
 
     public init(permissionHelper: ScreenCapturePermissionHelper = ScreenCapturePermissionHelper()) {
         self.permissionHelper = permissionHelper
@@ -37,75 +36,6 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     public func updateInputGain(_ inputGain: InputGain) {
         runtimeLock.withLock {
             captureSettings.inputGain = inputGain
-        }
-    }
-
-    public func startMonitoring(captureSettings requestedSettings: AudioCaptureSettings = AudioCaptureSettings()) async throws {
-        var streamToRestart: SCStream?
-        runtimeLock.withLock {
-            self.captureSettings = requestedSettings
-            if let stream,
-               writer == nil,
-               activeInputMode != requestedSettings.inputMode {
-                self.stream = nil
-                activeInputMode = nil
-                streamToRestart = stream
-            }
-        }
-
-        if let streamToRestart {
-            try? await stopCapture(streamToRestart)
-        }
-
-        var taskToAwait: Task<Void, any Error>?
-        var isAlreadyMonitoring = false
-        var shouldNotifyMonitoring = false
-
-        runtimeLock.withLock {
-            if self.stream != nil {
-                taskToAwait = nil
-                isAlreadyMonitoring = true
-                if self.currentState == .idle {
-                    self.currentState = .monitoring
-                    shouldNotifyMonitoring = true
-                }
-            } else if let monitoringStartTask = self.monitoringStartTask {
-                taskToAwait = monitoringStartTask
-            } else {
-                let monitoringStartTask = Task { try await self.startAndStoreStream() }
-                self.monitoringStartTask = monitoringStartTask
-                taskToAwait = monitoringStartTask
-            }
-        }
-
-        if shouldNotifyMonitoring {
-            onStateChange?(.monitoring)
-        }
-        guard !isAlreadyMonitoring, let taskToAwait else {
-            return
-        }
-
-        do {
-            try await taskToAwait.value
-        } catch {
-            runtimeLock.withLock {
-                self.monitoringStartTask = nil
-            }
-            throw error
-        }
-
-        let stateToNotify: RecordingState? = runtimeLock.withLock {
-            self.monitoringStartTask = nil
-
-            guard self.currentState == .idle else {
-                return nil
-            }
-
-            self.currentState = .monitoring
-            return .monitoring
-        }
-        if let stateToNotify {
-            onStateChange?(stateToNotify)
         }
     }
 
@@ -187,19 +117,38 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             self.captureSettings = requestedSettings
         }
 
-        let needsMonitoring = try runtimeLock.withLock {
+        let streamToReplace = runtimeLock.withLock {
+            guard let stream, activeInputMode != requestedSettings.inputMode else {
+                return nil as SCStream?
+            }
+            self.stream = nil
+            activeInputMode = nil
+            return stream
+        }
+        if let streamToReplace {
+            try? await stopCapture(streamToReplace)
+        }
+
+        let needsCapture = try runtimeLock.withLock {
+            let canStart: Bool
+            switch currentState {
+            case .idle, .error:
+                canStart = true
+            case .recording, .paused, .saving:
+                canStart = false
+            }
             guard !isStartingRecording,
                   writer == nil,
-                  currentState == .idle || currentState == .monitoring else {
+                  canStart else {
                 throw RecorderError.writerFailed("Recording is already starting or in progress.")
             }
             isStartingRecording = true
-            return stream == nil || activeInputMode != requestedSettings.inputMode
+            return stream == nil
         }
 
         do {
-            if needsMonitoring {
-                try await startMonitoring(captureSettings: requestedSettings)
+            if needsCapture {
+                try await startAndStoreStream()
             }
         } catch {
             runtimeLock.withLock {
@@ -247,16 +196,20 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     }
 
     public func stopRecording() async {
-        let writerToFinish = runtimeLock.withLock {
+        let stopContext = runtimeLock.withLock {
             let writerToFinish = writer
             writer = nil
             isPaused = false
             recordingTimeline.reset()
-            return writerToFinish
+            let streamToStop = stream
+            stream = nil
+            activeInputMode = nil
+            return (writerToFinish, streamToStop)
         }
 
-        guard let writerToFinish else {
-            transition(to: runtimeLock.withLock { stream == nil ? .idle : .monitoring })
+        guard let writerToFinish = stopContext.0 else {
+            await stopStreamIfNeeded(stopContext.1)
+            transition(to: .idle)
             return
         }
 
@@ -264,13 +217,15 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
 
         do {
             let url = try await writerToFinish.finish()
-            transition(to: runtimeLock.withLock { stream == nil ? .idle : .monitoring })
+            await stopStreamIfNeeded(stopContext.1)
+            transition(to: .idle)
             onFinishedSaving?(url)
         } catch {
+            await stopStreamIfNeeded(stopContext.1)
             let stateAfterFailure = runtimeLock.withLock {
                 Self.stateAfterSaveFailure(
                     message: error.localizedDescription,
-                    hasActiveStream: stream != nil
+                    hasActiveStream: stopContext.1 != nil
                 )
             }
             transition(to: stateAfterFailure)
@@ -278,7 +233,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         }
     }
 
-    public func cancelRecording() {
+    public func cancelRecording() async {
         let result = runtimeLock.withLock {
             let writerToCancel = writer
             writer = nil
@@ -286,14 +241,18 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             isStartingRecording = false
             waveform.reset()
             recordingTimeline.reset()
-            return (writerToCancel, waveform.points, stream == nil ? RecordingState.idle : .monitoring)
+            let streamToStop = stream
+            stream = nil
+            activeInputMode = nil
+            return (writerToCancel, waveform.points, streamToStop)
         }
         result.0?.cancel()
+        await stopStreamIfNeeded(result.2)
         onWaveform?(result.1)
-        transition(to: result.2)
+        transition(to: .idle)
     }
 
-    public func stopMonitoring() async {
+    public func stopCaptureStream() async {
         let result = runtimeLock.withLock {
             let writerToCancel = writer
             writer = nil
@@ -393,6 +352,17 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         }
     }
 
+    private func stopStreamIfNeeded(_ stream: SCStream?) async {
+        guard let stream else {
+            return
+        }
+        do {
+            try await stopCapture(stream)
+        } catch {
+            onError?(error.localizedDescription)
+        }
+    }
+
     private static func ensureMicrophonePermission() async throws {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
@@ -424,7 +394,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     }
 
     package static func stateAfterSaveFailure(message: String, hasActiveStream: Bool) -> RecordingState {
-        hasActiveStream ? .monitoring : .error(message)
+        .error(message)
     }
 }
 
@@ -457,7 +427,6 @@ extension AudioRecorder: SCStreamDelegate {
             isPaused = false
             isStartingRecording = false
             recordingTimeline.reset()
-            monitoringStartTask = nil
             return (writerToCancel, true)
         }
         guard result.1 else {

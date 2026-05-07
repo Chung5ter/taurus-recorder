@@ -20,7 +20,7 @@ struct CoreBehaviorTests {
         testWaveformKeepsRollingWindow()
         testWaveformDetectsAmplitude()
         testRecordingTimelineSubtractsPausedGap()
-        testSaveFailureReturnsToMonitoringWhenStreamIsActive()
+        testSaveFailureReturnsErrorWhenStreamIsActive()
         testSaveFailureReturnsErrorWhenStreamIsInactive()
         testScreenCaptureTCCErrorMapsToScreenPermission()
         testMicrophonePermissionErrorIsActionable()
@@ -151,13 +151,13 @@ private func testRecordingTimelineSubtractsPausedGap() {
     precondition(resumedOffset == CMTime(value: 9, timescale: 1))
 }
 
-private func testSaveFailureReturnsToMonitoringWhenStreamIsActive() {
+private func testSaveFailureReturnsErrorWhenStreamIsActive() {
     let state = AudioRecorder.stateAfterSaveFailure(
         message: "No system audio was captured before stopping.",
         hasActiveStream: true
     )
 
-    precondition(state == .monitoring)
+    precondition(state == .error("No system audio was captured before stopping."))
 }
 
 private func testSaveFailureReturnsErrorWhenStreamIsInactive() {

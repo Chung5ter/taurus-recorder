@@ -24,7 +24,7 @@ public enum RecorderError: LocalizedError {
         case .noDisplayAvailable:
             "No display is available for ScreenCaptureKit audio capture."
         case .streamOutputRegistrationFailed(let message):
-            "Could not start system audio monitoring: \(message)"
+            "Could not start audio capture: \(message)"
         case .unsupportedAudioBuffer:
             "The system audio buffer format could not be read."
         case .writerNotReady:

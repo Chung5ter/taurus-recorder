@@ -3,7 +3,6 @@ import TaurusRecorderCore
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var appSettings: AppSettings
     @StateObject private var viewModel: RecorderViewModel
 
@@ -35,9 +34,6 @@ struct ContentView: View {
                 .background(Color(nsColor: .underPageBackgroundColor))
         }
         .frame(minWidth: 880, minHeight: 620)
-        .task {
-            viewModel.beginMonitoring()
-        }
         .onChange(of: appSettings.defaultSaveFolderURL) { _, _ in
             viewModel.applyDefaultsFromSettings()
         }
@@ -49,11 +45,6 @@ struct ContentView: View {
         }
         .onChange(of: appSettings.defaultInputGain) { _, _ in
             viewModel.applyDefaultsFromSettings()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                viewModel.retryMonitoringIfPermissionWasGranted()
-            }
         }
         .sheet(isPresented: pendingSaveSheetBinding) {
             PendingRecordingSheet(viewModel: viewModel)

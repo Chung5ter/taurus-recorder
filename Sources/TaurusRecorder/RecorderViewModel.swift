@@ -74,7 +74,6 @@ final class RecorderViewModel: ObservableObject {
             if appSettings.defaultInputMode != inputMode {
                 appSettings.defaultInputMode = inputMode
             }
-            refreshMonitoringForCaptureSettingsChange(oldInputMode: oldValue)
         }
     }
     @Published var inputGain: InputGain = .unity {
@@ -171,6 +170,9 @@ final class RecorderViewModel: ObservableObject {
     }
 
     var meterStatusText: String {
+        if !canStop {
+            return "Ready to record \(inputMode.displayName.lowercased())"
+        }
         let source = inputMode.displayName.lowercased()
         return meterReading.isSilent ? "No \(source) audio detected" : "\(inputMode.displayName) audio detected"
     }
@@ -185,28 +187,6 @@ final class RecorderViewModel: ObservableObject {
         let minutes = (totalSeconds % 3600) / 60
         let seconds = totalSeconds % 60
         return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-    }
-
-    func beginMonitoring() {
-        Task {
-            do {
-                try await recorder.startMonitoring(captureSettings: captureSettings)
-                errorMessage = nil
-                permissionIssue = nil
-            } catch {
-                present(error)
-            }
-        }
-    }
-
-    func retryMonitoringIfPermissionWasGranted() {
-        switch state {
-        case .idle, .error:
-            errorMessage = nil
-            beginMonitoring()
-        case .monitoring, .recording, .paused, .saving:
-            break
-        }
     }
 
     func primaryControlTapped() {
@@ -252,7 +232,9 @@ final class RecorderViewModel: ObservableObject {
         elapsedTime = 0
         waveformPoints = []
         activeSuggestedURL = nil
-        recorder.cancelRecording()
+        Task {
+            await recorder.cancelRecording()
+        }
     }
 
     func chooseSaveFolder() {
@@ -343,7 +325,7 @@ final class RecorderViewModel: ObservableObject {
 
     func applyDefaultsFromSettings() {
         switch state {
-        case .idle, .monitoring, .error:
+        case .idle, .error:
             break
         case .recording, .paused, .saving:
             return
@@ -556,18 +538,6 @@ final class RecorderViewModel: ObservableObject {
 
     private var captureSettings: AudioCaptureSettings {
         AudioCaptureSettings(inputMode: inputMode, inputGain: inputGain)
-    }
-
-    private func refreshMonitoringForCaptureSettingsChange(oldInputMode: RecordingInputMode) {
-        guard oldInputMode != inputMode else {
-            return
-        }
-        switch state {
-        case .idle, .monitoring, .error:
-            beginMonitoring()
-        case .recording, .paused, .saving:
-            break
-        }
     }
 
     private func clearPendingRecording() {

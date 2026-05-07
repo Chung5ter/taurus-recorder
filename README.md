@@ -8,7 +8,7 @@ System recording programs for Mac exist, but they always felt somewhat complex b
 
 GitHub: [Chung5ter/taurus-recorder](https://github.com/Chung5ter/taurus-recorder)
 
-DMG download: [v0.2.1 release](https://github.com/Chung5ter/taurus-recorder/releases/tag/v0.2.1)
+DMG download: [v0.2.2 release](https://github.com/Chung5ter/taurus-recorder/releases/tag/v0.2.2)
 
 ## What It Includes
 
@@ -21,6 +21,7 @@ DMG download: [v0.2.1 release](https://github.com/Chung5ter/taurus-recorder/rele
 - Save folder selector, post-stop save/delete confirmation, M4A/MP3/WAV output selector, and recording source selector.
 - Native Settings panel available from the app menu or `Command + ,`.
 - Plain Screen Recording and Microphone permission guidance inside the app.
+- macOS privacy indicators only appear during active recording or pause, not while the app is idle.
 
 ## Build
 

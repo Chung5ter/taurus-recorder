@@ -2,7 +2,6 @@ import Foundation
 
 public enum RecordingState: Equatable, Sendable {
     case idle
-    case monitoring
     case recording
     case paused
     case saving
@@ -12,8 +11,6 @@ public enum RecordingState: Equatable, Sendable {
         switch self {
         case .idle:
             "Idle"
-        case .monitoring:
-            "Monitoring"
         case .recording:
             "Recording"
         case .paused:
