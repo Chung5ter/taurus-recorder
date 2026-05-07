@@ -49,22 +49,82 @@ cp -R "$APP_DIR" "$MOUNT_DIR/"
 ln -s /Applications "$MOUNT_DIR/Applications"
 mkdir -p "$MOUNT_DIR/.background" "$BACKGROUND_DIR"
 
-cat > "$BACKGROUND_DIR/background.svg" <<'SVG'
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420">
-  <defs>
-    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.18"/>
-    </filter>
-  </defs>
-  <rect width="640" height="420" fill="#f5f5f7"/>
-  <path d="M251 166 H343" fill="none" stroke="#6e6e73" stroke-width="14" stroke-linecap="round" filter="url(#shadow)"/>
-  <path d="M337 132 L394 166 L337 200 Z" fill="#6e6e73" filter="url(#shadow)"/>
-  <text x="320" y="266" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#6e6e73">Drag Taurus Recorder to Applications</text>
-</svg>
-SVG
+cat > "$BACKGROUND_DIR/create-background.swift" <<'SWIFT'
+import AppKit
 
-qlmanage -t -s 640 -o "$BACKGROUND_DIR" "$BACKGROUND_DIR/background.svg" >/dev/null 2>&1
-mv "$BACKGROUND_DIR/background.svg.png" "$MOUNT_DIR/.background/background.png"
+let outputPath = CommandLine.arguments[1]
+let width = 640
+let height = 420
+let size = NSSize(width: width, height: height)
+guard let bitmap = NSBitmapImageRep(
+    bitmapDataPlanes: nil,
+    pixelsWide: width,
+    pixelsHigh: height,
+    bitsPerSample: 8,
+    samplesPerPixel: 4,
+    hasAlpha: true,
+    isPlanar: false,
+    colorSpaceName: .deviceRGB,
+    bytesPerRow: 0,
+    bitsPerPixel: 0
+) else {
+    fatalError("failed to create DMG background bitmap")
+}
+bitmap.size = size
+
+NSGraphicsContext.saveGraphicsState()
+NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+NSGraphicsContext.current?.shouldAntialias = true
+
+NSColor(calibratedRed: 0.961, green: 0.961, blue: 0.969, alpha: 1).setFill()
+NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+
+let shadow = NSShadow()
+shadow.shadowOffset = NSSize(width: 0, height: -2)
+shadow.shadowBlurRadius = 3
+shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.18)
+NSGraphicsContext.saveGraphicsState()
+shadow.set()
+
+NSColor(calibratedRed: 0.431, green: 0.431, blue: 0.451, alpha: 1).setStroke()
+let shaft = NSBezierPath()
+shaft.lineWidth = 14
+shaft.lineCapStyle = .round
+shaft.move(to: NSPoint(x: 251, y: 254))
+shaft.line(to: NSPoint(x: 343, y: 254))
+shaft.stroke()
+
+NSColor(calibratedRed: 0.431, green: 0.431, blue: 0.451, alpha: 1).setFill()
+let arrowHead = NSBezierPath()
+arrowHead.move(to: NSPoint(x: 337, y: 288))
+arrowHead.line(to: NSPoint(x: 394, y: 254))
+arrowHead.line(to: NSPoint(x: 337, y: 220))
+arrowHead.close()
+arrowHead.fill()
+
+NSGraphicsContext.restoreGraphicsState()
+
+let message = "Drag Taurus Recorder to Applications"
+let attributes: [NSAttributedString.Key: Any] = [
+    .font: NSFont.systemFont(ofSize: 18, weight: .regular),
+    .foregroundColor: NSColor(calibratedRed: 0.431, green: 0.431, blue: 0.451, alpha: 1)
+]
+let textSize = message.size(withAttributes: attributes)
+message.draw(
+    at: NSPoint(x: (size.width - textSize.width) / 2, y: 135),
+    withAttributes: attributes
+)
+
+NSGraphicsContext.restoreGraphicsState()
+
+guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+    fatalError("failed to render DMG background")
+}
+
+try pngData.write(to: URL(fileURLWithPath: outputPath))
+SWIFT
+
+swift "$BACKGROUND_DIR/create-background.swift" "$MOUNT_DIR/.background/background.png"
 
 osascript <<APPLESCRIPT >/dev/null
 tell application "Finder"
