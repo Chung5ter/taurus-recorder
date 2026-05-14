@@ -7,7 +7,6 @@ struct SettingsView: View {
     @EnvironmentObject private var appSettings: AppSettings
     @State private var draftSaveFolderURL = FileManager.default.homeDirectoryForCurrentUser
     @State private var draftOutputFormat: OutputFormat = .m4a
-    @State private var draftInputMode: RecordingInputMode = .computer
     @State private var draftInputGain: InputGain = .unity
     @State private var selectedTab = SettingsTab.general
 
@@ -16,7 +15,6 @@ struct SettingsView: View {
     private var hasChanges: Bool {
         draftSaveFolderURL != appSettings.defaultSaveFolderURL
             || draftOutputFormat != appSettings.defaultOutputFormat
-            || draftInputMode != appSettings.defaultInputMode
             || draftInputGain != appSettings.defaultInputGain
     }
 
@@ -47,7 +45,6 @@ struct SettingsView: View {
             Form {
                 Section("Recording Defaults") {
                     FormatSelector(selection: $draftOutputFormat) {}
-                    SourceSelector(selection: $draftInputMode)
                     GainSlider(gain: $draftInputGain)
 
                     HStack {
@@ -57,11 +54,15 @@ struct SettingsView: View {
                             .truncationMode(.middle)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button("Choose") {
+                        Button {
                             chooseDraftSaveFolder()
+                        } label: {
+                            Label("Choose", systemImage: "folder")
                         }
-                        Button("Open") {
+                        Button {
                             NSWorkspace.shared.open(draftSaveFolderURL)
+                        } label: {
+                            Label("Open", systemImage: "arrow.up.forward.app")
                         }
                     }
                 }
@@ -75,17 +76,19 @@ struct SettingsView: View {
                     loadDraftFromSettings()
                     dismiss()
                 }
+                .recorderSecondaryButtonStyle()
 
-                Button("Save") {
+                Button {
                     appSettings.updateDefaults(
                         saveFolderURL: draftSaveFolderURL,
                         outputFormat: draftOutputFormat,
-                        inputMode: draftInputMode,
                         inputGain: draftInputGain
                     )
                     loadDraftFromSettings()
+                } label: {
+                    Label("Save", systemImage: "checkmark")
                 }
-                .buttonStyle(.borderedProminent)
+                .recorderPrimaryButtonStyle()
                 .disabled(!hasChanges)
             }
         }
@@ -109,14 +112,13 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Permissions")
                     .font(.headline)
-                Text("Computer audio capture uses macOS Screen Recording permission. Microphone capture uses macOS Microphone permission. Taurus Recorder does not save screen video.")
+                Text("Computer audio capture uses macOS Screen & System Audio Recording permission. Taurus Recorder does not save screen video.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Open Screen Recording Settings") {
+                Button {
                     permissionHelper.openScreenRecordingSettings()
-                }
-                Button("Open Microphone Settings") {
-                    permissionHelper.openMicrophoneSettings()
+                } label: {
+                    Label("Open Screen Recording Settings", systemImage: "gearshape")
                 }
             }
 
@@ -129,7 +131,6 @@ struct SettingsView: View {
     private func loadDraftFromSettings() {
         draftSaveFolderURL = appSettings.defaultSaveFolderURL
         draftOutputFormat = appSettings.defaultOutputFormat
-        draftInputMode = appSettings.defaultInputMode
         draftInputGain = appSettings.defaultInputGain
     }
 

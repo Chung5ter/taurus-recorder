@@ -12,35 +12,51 @@ struct ContentView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
+            RecordingHistorySidebar(viewModel: viewModel)
+                .navigationTitle("History")
+                .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 330)
+        } detail: {
             ScrollView {
-                VStack(spacing: 22) {
-                    header
+                VStack(spacing: 20) {
                     transport
                     AudioLevelMeterView(reading: viewModel.meterReading, statusText: viewModel.meterStatusText)
                     WaveformView(points: viewModel.waveformPoints, isActive: viewModel.state == .recording)
                     saveControls
                     footer
                 }
-                .padding(28)
+                .padding(.top, 28)
+                .padding(.horizontal, 28)
+                .padding(.bottom, 18)
+                .frame(maxWidth: 760)
                 .frame(maxWidth: .infinity)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .navigationTitle("Taurus Recorder")
+            .toolbar {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Label(viewModel.state.title, systemImage: stateSystemImage)
+                        .foregroundStyle(stateColor)
 
-            Divider()
-
-            RecordingHistorySidebar(viewModel: viewModel)
-                .frame(width: 270)
-                .background(Color(nsColor: .underPageBackgroundColor))
+                    Button {
+                        viewModel.refreshAvailableCaptureApps()
+                    } label: {
+                        Label("Refresh Sources", systemImage: "arrow.clockwise")
+                    }
+                    .help("Refresh running apps")
+                    .disabled(viewModel.canStop || viewModel.state == .saving)
+                }
+            }
         }
-        .frame(minWidth: 880, minHeight: 620)
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 840, minHeight: 600)
+        .onAppear {
+            viewModel.refreshAvailableCaptureApps()
+            viewModel.startMonitoring()
+        }
         .onChange(of: appSettings.defaultSaveFolderURL) { _, _ in
             viewModel.applyDefaultsFromSettings()
         }
         .onChange(of: appSettings.defaultOutputFormat) { _, _ in
-            viewModel.applyDefaultsFromSettings()
-        }
-        .onChange(of: appSettings.defaultInputMode) { _, _ in
             viewModel.applyDefaultsFromSettings()
         }
         .onChange(of: appSettings.defaultInputGain) { _, _ in
@@ -64,24 +80,6 @@ struct ContentView: View {
         )
     }
 
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Taurus Recorder")
-                    .font(.system(size: 22, weight: .semibold))
-            }
-
-            Spacer()
-
-            Text(viewModel.state.title)
-                .font(.headline)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(stateColor.opacity(0.14), in: Capsule())
-                .foregroundStyle(stateColor)
-        }
-    }
-
     private var transport: some View {
         VStack(spacing: 14) {
             Text(viewModel.formattedElapsedTime)
@@ -96,10 +94,9 @@ struct ContentView: View {
                         .font(.title3.weight(.semibold))
                         .frame(width: 152, height: 54)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(viewModel.canStop ? .red : nil)
+                .recorderPrimaryButtonStyle(isDestructive: viewModel.canStop)
                 .controlSize(.large)
-                .disabled(viewModel.state == .saving)
+                .disabled(viewModel.state == .saving || viewModel.isMonitoringStarting)
 
                 Button {
                     viewModel.secondaryControlTapped()
@@ -107,6 +104,7 @@ struct ContentView: View {
                     Label(viewModel.secondaryControlTitle, systemImage: viewModel.secondaryControlSystemImage)
                         .frame(width: 106, height: 44)
                 }
+                .recorderSecondaryButtonStyle()
                 .controlSize(.large)
                 .disabled(!viewModel.canStop || viewModel.state == .saving)
 
@@ -116,6 +114,7 @@ struct ContentView: View {
                     Label("Cancel", systemImage: "xmark")
                         .frame(width: 106, height: 44)
                 }
+                .recorderSecondaryButtonStyle()
                 .controlSize(.large)
                 .disabled(!viewModel.canStop || viewModel.state == .saving)
             }
@@ -141,7 +140,7 @@ struct ContentView: View {
                     Button {
                         viewModel.openSaveFolder()
                     } label: {
-                        Text("Open Folder")
+                        Label("Open", systemImage: "arrow.up.forward.app")
                     }
                 }
             }
@@ -152,14 +151,28 @@ struct ContentView: View {
                 FormatSelector(selection: $viewModel.outputFormat) {
                     openSettingsWindow()
                 }
-                .frame(width: 240)
+                .frame(width: 300)
             }
 
             GridRow {
-                Text("Source")
+                Text("Audio Source")
                     .foregroundStyle(.secondary)
-                SourceSelector(selection: $viewModel.inputMode)
+                HStack(spacing: 8) {
+                    CaptureTargetSelector(
+                        selection: $viewModel.captureTarget,
+                        targets: viewModel.captureTargetOptions
+                    )
                     .frame(width: 300)
+                    .disabled(viewModel.canStop || viewModel.state == .saving)
+
+                    Button {
+                        viewModel.refreshAvailableCaptureApps()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("Refresh running apps")
+                    .disabled(viewModel.canStop || viewModel.state == .saving)
+                }
             }
 
             GridRow {
@@ -177,39 +190,43 @@ struct ContentView: View {
         NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
     }
 
+    @ViewBuilder
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let errorMessage = viewModel.errorMessage {
-                VStack(alignment: .leading, spacing: 8) {
+        if viewModel.errorMessage != nil || viewModel.lastSavedURL != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                if let errorMessage = viewModel.errorMessage {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text(viewModel.permissionIssue?.message ?? errorMessage)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                        }
+
+                        permissionButtons
+                    }
+                    .font(.callout)
+                }
+
+                if let lastSavedURL = viewModel.lastSavedURL {
                     HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                        Text(viewModel.permissionIssue?.message ?? errorMessage)
-                            .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Saved: \(lastSavedURL.lastPathComponent)")
+                            .lineLimit(1)
                         Spacer()
                     }
-
-                    permissionButtons
+                    .font(.callout)
+                    .transition(.opacity)
                 }
-                .font(.callout)
             }
-
-            if let lastSavedURL = viewModel.lastSavedURL {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text("Saved: \(lastSavedURL.lastPathComponent)")
-                        .lineLimit(1)
-                    Spacer()
-                }
-                .font(.callout)
-                .transition(.opacity)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .recorderGlassSurface(cornerRadius: 14)
+            .animation(.easeInOut(duration: 0.35), value: viewModel.lastSavedURL)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 28)
-        .animation(.easeInOut(duration: 0.35), value: viewModel.lastSavedURL)
     }
 
     @ViewBuilder
@@ -217,13 +234,10 @@ struct ContentView: View {
         if let permissionIssue = viewModel.permissionIssue {
             HStack(spacing: 8) {
                 if permissionIssue.destinations.contains(.screenRecording) {
-                    Button("Open Screen Settings") {
+                    Button {
                         viewModel.openScreenRecordingSettings()
-                    }
-                }
-                if permissionIssue.destinations.contains(.microphone) {
-                    Button("Open Microphone Settings") {
-                        viewModel.openMicrophoneSettings()
+                    } label: {
+                        Label("Open Screen Settings", systemImage: "gearshape")
                     }
                 }
                 Spacer()
@@ -231,8 +245,10 @@ struct ContentView: View {
         } else {
             HStack {
                 if viewModel.errorMessage != nil {
-                    Button("Open Settings") {
+                    Button {
                         viewModel.openScreenRecordingSettings()
+                    } label: {
+                        Label("Open Settings", systemImage: "gearshape")
                     }
                 }
             }
@@ -253,55 +269,46 @@ struct ContentView: View {
             .secondary
         }
     }
+
+    private var stateSystemImage: String {
+        switch viewModel.state {
+        case .recording:
+            "record.circle.fill"
+        case .paused:
+            "pause.circle"
+        case .saving:
+            "square.and.arrow.down"
+        case .error:
+            "exclamationmark.triangle"
+        default:
+            "waveform"
+        }
+    }
 }
 
-struct SourceSelector: View {
-    @Binding var selection: RecordingInputMode
+struct CaptureTargetSelector: View {
+    @Binding var selection: AudioCaptureTarget
+    let targets: [AudioCaptureTarget]
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(RecordingInputMode.allCases) { mode in
-                Button {
-                    selection = mode
-                } label: {
-                    Text(mode.displayName)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(selection == mode ? .white : .primary)
-                .background {
-                    if selection == mode {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.accentColor)
-                    } else {
-                        Color.clear
-                    }
-                }
-
-                if mode != RecordingInputMode.allCases.last {
-                    Divider()
-                        .frame(height: 18)
-                }
+        Picker("Audio Source", selection: $selection) {
+            ForEach(targets, id: \.self) { target in
+                Text(target.displayName)
+                    .tag(target)
             }
         }
-        .padding(2)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-        .overlay {
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
-        }
+        .labelsHidden()
+        .pickerStyle(.menu)
     }
 }
 
 struct GainSlider: View {
     @Binding var gain: InputGain
 
-    private var multiplierBinding: Binding<Double> {
+    private var notchBinding: Binding<Double> {
         Binding(
-            get: { Double(gain.multiplier) },
-            set: { gain = InputGain(multiplier: Float($0)) }
+            get: { Double(gain.notchIndex) },
+            set: { gain = InputGain(notchIndex: Int($0.rounded())) }
         )
     }
 
@@ -312,8 +319,9 @@ struct GainSlider: View {
                 .frame(width: 34, alignment: .leading)
 
             Slider(
-                value: multiplierBinding,
-                in: Double(InputGain.minimumMultiplier)...Double(InputGain.maximumMultiplier)
+                value: notchBinding,
+                in: Double(InputGain.minimumNotchIndex)...Double(InputGain.maximumNotchIndex),
+                step: 1
             )
 
             Text("3x")
@@ -332,65 +340,27 @@ struct FormatSelector: View {
     var unavailableMP3Tapped: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(OutputFormat.allCases) { format in
-                Button {
-                    handleTap(format)
-                } label: {
+        HStack(spacing: 8) {
+            Picker("Format", selection: $selection) {
+                ForEach(OutputFormat.allCases) { format in
                     Text(format.rawValue)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(foregroundStyle(for: format))
-                .background(background(for: format))
-                .help(helpText(for: format))
-
-                if format != OutputFormat.allCases.last {
-                    Divider()
-                        .frame(height: 18)
+                        .tag(format)
+                        .disabled(!format.isExportAvailable)
                 }
             }
-        }
-        .padding(2)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-        .overlay {
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
-        }
-    }
+            .labelsHidden()
+            .pickerStyle(.segmented)
 
-    private func handleTap(_ format: OutputFormat) {
-        if format.isExportAvailable {
-            selection = format
-        } else if format == .mp3 {
-            unavailableMP3Tapped()
+            if !OutputFormat.mp3.isExportAvailable {
+                Button {
+                    unavailableMP3Tapped()
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .help(AudioFileConverter.mp3UnavailableExplanation)
+                .recorderSecondaryButtonStyle()
+            }
         }
-    }
-
-    private func foregroundStyle(for format: OutputFormat) -> Color {
-        if selection == format {
-            return .white
-        }
-        return format.isExportAvailable ? .primary : .secondary.opacity(0.55)
-    }
-
-    @ViewBuilder
-    private func background(for format: OutputFormat) -> some View {
-        if selection == format {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.accentColor)
-        } else {
-            Color.clear
-        }
-    }
-
-    private func helpText(for format: OutputFormat) -> String {
-        if format == .mp3, !format.isExportAvailable {
-            return AudioFileConverter.mp3UnavailableExplanation
-        }
-        return "\(format.rawValue) format"
     }
 }
 
@@ -420,52 +390,70 @@ private struct RecordingHistorySidebar: View {
                 )
                 .font(.callout)
             } else {
-                List(viewModel.recordingHistory) { item in
-                    HStack(spacing: 8) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.displayName)
-                                .lineLimit(2)
-                            Text(item.detailText)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                ScrollViewReader { proxy in
+                    List(viewModel.recordingHistory) { item in
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.displayName)
+                                    .lineLimit(2)
+                                Text(item.detailText)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Button {
-                            viewModel.beginRename(item)
-                        } label: {
-                            Image(systemName: "pencil")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Rename")
+                            Button {
+                                viewModel.beginRename(item)
+                            } label: {
+                                Image(systemName: "pencil")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Rename")
 
-                        Button(role: .destructive) {
-                            viewModel.deleteRecording(item)
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Delete local file")
+                            Button(role: .destructive) {
+                                viewModel.deleteRecording(item)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Delete local file")
 
-                        Button {
-                            viewModel.revealRecording(item)
-                        } label: {
-                            Image(systemName: "folder")
+                            Button {
+                                viewModel.revealRecording(item)
+                            } label: {
+                                Image(systemName: "folder")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Open in folder")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Open in folder")
+                        .id(item.id)
+                        .contextMenu {
+                            Button("Open") {
+                                viewModel.openRecording(item)
+                            }
+                            Button("Reveal in Finder") {
+                                viewModel.revealRecording(item)
+                            }
+                        }
                     }
-                    .contextMenu {
-                        Button("Open") {
-                            viewModel.openRecording(item)
+                    .listStyle(.sidebar)
+                    .onAppear {
+                        if let firstID = viewModel.recordingHistory.first?.id {
+                            proxy.scrollTo(firstID, anchor: .top)
                         }
-                        Button("Reveal in Finder") {
-                            viewModel.revealRecording(item)
+                    }
+                    .onChange(of: viewModel.recordingHistory.first?.id) { _, newID in
+                        guard let newID else {
+                            return
+                        }
+                        Task { @MainActor in
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(newID, anchor: .top)
+                            }
                         }
                     }
                 }
-                .listStyle(.sidebar)
             }
 
             Spacer(minLength: 0)

@@ -16,9 +16,6 @@ struct WaveformView: View {
             .font(.callout)
 
             Canvas { context, size in
-                let background = Path(CGRect(origin: .zero, size: size))
-                context.fill(background, with: .color(Color(nsColor: .textBackgroundColor)))
-
                 drawCenterLine(context: context, size: size)
 
                 guard !points.isEmpty else {
@@ -41,6 +38,7 @@ struct WaveformView: View {
                 }
             }
             .frame(height: 150)
+            .recorderGlassSurface(cornerRadius: 12)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
