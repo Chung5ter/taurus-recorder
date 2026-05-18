@@ -3,8 +3,10 @@ import TaurusRecorderCore
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.openSettings) private var openSettings
     @ObservedObject private var appSettings: AppSettings
     @StateObject private var viewModel: RecorderViewModel
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     init(appSettings: AppSettings) {
         self.appSettings = appSettings
@@ -12,39 +14,55 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             RecordingHistorySidebar(viewModel: viewModel)
                 .navigationTitle("History")
-                .navigationSplitViewColumnWidth(min: 240, ideal: 270, max: 330)
+                .navigationSplitViewColumnWidth(min: 250, ideal: 285, max: 340)
         } detail: {
             ScrollView {
                 VStack(spacing: 20) {
                     transport
-                    AudioLevelMeterView(reading: viewModel.meterReading, statusText: viewModel.meterStatusText)
-                    WaveformView(points: viewModel.waveformPoints, isActive: viewModel.state == .recording)
+                    LiveVisualsView(
+                        store: viewModel.visualStore,
+                        readyStatusText: viewModel.readyMeterStatusText,
+                        silentStatusText: viewModel.silentMeterStatusText,
+                        activeStatusText: viewModel.activeMeterStatusText,
+                        canStop: viewModel.canStop,
+                        isActive: viewModel.state == .recording
+                    )
                     saveControls
                     footer
                 }
-                .padding(.top, 28)
-                .padding(.horizontal, 28)
-                .padding(.bottom, 18)
-                .frame(maxWidth: 760)
+                .padding(.top, 26)
+                .padding(.horizontal, 32)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 780)
                 .frame(maxWidth: .infinity)
-            }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                HStack(spacing: 10) {
-                    Spacer()
-                    RecordingStatusPill(state: viewModel.state)
-                    SettingsPillButton {
-                        openSettingsWindow()
-                    }
-                }
-                .padding(.top, 8)
-                .padding(.trailing, 22)
             }
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 840, minHeight: 600)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        columnVisibility = columnVisibility == .all ? .detailOnly : .all
+                    }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help(columnVisibility == .all ? "Hide History" : "Show History")
+                .accessibilityLabel(columnVisibility == .all ? "Hide History" : "Show History")
+
+                Button {
+                    openSettings()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .help("Settings")
+                .accessibilityLabel("Settings")
+            }
+        }
         .background(WindowTitleHider())
         .onAppear {
             viewModel.refreshAvailableCaptureApps()
@@ -79,9 +97,18 @@ struct ContentView: View {
 
     private var transport: some View {
         VStack(spacing: 14) {
-            Text(viewModel.formattedElapsedTime)
-                .font(.system(size: 48, weight: .medium, design: .rounded))
-                .monospacedDigit()
+            HStack(alignment: .center, spacing: 18) {
+                RecordingStatusPill(state: viewModel.state)
+                    .hidden()
+                    .accessibilityHidden(true)
+
+                Text(viewModel.formattedElapsedTime)
+                    .font(.system(size: 48, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+
+                RecordingStatusPill(state: viewModel.state)
+            }
+            .frame(maxWidth: .infinity)
 
             HStack(spacing: 14) {
                 Button {
@@ -116,6 +143,7 @@ struct ContentView: View {
                 .disabled(!viewModel.canStop || viewModel.state == .saving)
             }
         }
+        .padding(.top, 6)
     }
 
     private var saveControls: some View {
@@ -146,7 +174,7 @@ struct ContentView: View {
                 Text("Format")
                     .foregroundStyle(.secondary)
                 FormatSelector(selection: $viewModel.outputFormat) {
-                    openSettingsWindow()
+                    openSettings()
                 }
                 .frame(width: 300)
             }
@@ -180,11 +208,8 @@ struct ContentView: View {
             }
         }
         .font(.callout)
-    }
-
-    private func openSettingsWindow() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+        .padding(16)
+        .recorderGlassSurface(cornerRadius: 18, interactive: true)
     }
 
     @ViewBuilder
@@ -254,6 +279,29 @@ struct ContentView: View {
 
 }
 
+private struct LiveVisualsView: View {
+    @ObservedObject var store: LiveVisualStore
+    let readyStatusText: String
+    let silentStatusText: String
+    let activeStatusText: String
+    let canStop: Bool
+    let isActive: Bool
+
+    var body: some View {
+        VStack(spacing: 14) {
+            AudioLevelMeterView(reading: store.frame.meterReading, statusText: statusText)
+            WaveformView(points: store.frame.waveformPoints, isActive: isActive)
+        }
+    }
+
+    private var statusText: String {
+        if !canStop {
+            return readyStatusText
+        }
+        return store.frame.meterReading.isSilent ? silentStatusText : activeStatusText
+    }
+}
+
 private struct WindowTitleHider: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -267,7 +315,12 @@ private struct WindowTitleHider: NSViewRepresentable {
 
     private func apply(to view: NSView) {
         DispatchQueue.main.async {
-            view.window?.titleVisibility = .hidden
+            guard let window = view.window else {
+                return
+            }
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = false
+            window.styleMask.remove(.fullSizeContentView)
         }
     }
 }
@@ -353,27 +406,6 @@ private struct RecordingStatusPill: View {
     }
 }
 
-private struct SettingsPillButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "gearshape")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 34, height: 34)
-                .background(Color.secondary.opacity(0.1), in: Capsule(style: .continuous))
-                .overlay {
-                    Capsule(style: .continuous)
-                        .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .help("Settings")
-        .accessibilityLabel("Settings")
-    }
-}
-
 struct CaptureTargetSelector: View {
     @Binding var selection: AudioCaptureTarget
     let targets: [AudioCaptureTarget]
@@ -456,10 +488,8 @@ private struct RecordingHistorySidebar: View {
     @ObservedObject var viewModel: RecorderViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("History")
-                    .font(.headline)
                 Spacer()
                 Button {
                     viewModel.refreshHistory()
@@ -477,11 +507,11 @@ private struct RecordingHistorySidebar: View {
                     description: Text("Saved recordings in this folder will appear here.")
                 )
                 .font(.callout)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollViewReader { proxy in
-                    List(viewModel.recordingHistory) { item in
-                        RecordingHistoryRow(viewModel: viewModel, item: item)
-                        .id(item.id)
+                List(viewModel.recordingHistory) { item in
+                    RecordingHistoryRow(viewModel: viewModel, item: item)
+                        .listRowSeparator(.hidden)
                         .contextMenu {
                             Button("Play") {
                                 viewModel.togglePlayback(for: item)
@@ -493,29 +523,14 @@ private struct RecordingHistorySidebar: View {
                                 viewModel.revealRecording(item)
                             }
                         }
-                    }
-                    .listStyle(.sidebar)
-                    .onAppear {
-                        if let firstID = viewModel.recordingHistory.first?.id {
-                            proxy.scrollTo(firstID, anchor: .top)
-                        }
-                    }
-                    .onChange(of: viewModel.recordingHistory.first?.id) { _, newID in
-                        guard let newID else {
-                            return
-                        }
-                        Task { @MainActor in
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                proxy.scrollTo(newID, anchor: .top)
-                            }
-                        }
-                    }
                 }
+                .listStyle(.sidebar)
             }
 
             Spacer(minLength: 0)
         }
-        .padding(14)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
     }
 }
 
@@ -541,6 +556,7 @@ private struct RecordingHistoryRow: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.displayName)
+                        .font(.callout.weight(.medium))
                         .lineLimit(2)
                     Text(item.detailText)
                         .font(.caption)
@@ -553,29 +569,32 @@ private struct RecordingHistoryRow: View {
                     viewModel.showPlayback(for: item)
                 }
 
-                Button {
-                    viewModel.beginRename(item)
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .buttonStyle(.borderless)
-                .help("Rename")
+                HStack(spacing: 6) {
+                    Button {
+                        viewModel.beginRename(item)
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Rename")
 
-                Button(role: .destructive) {
-                    viewModel.deleteRecording(item)
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .help("Delete local file")
+                    Button(role: .destructive) {
+                        viewModel.deleteRecording(item)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Delete local file")
 
-                Button {
-                    viewModel.revealRecording(item)
-                } label: {
-                    Image(systemName: "folder")
+                    Button {
+                        viewModel.revealRecording(item)
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Open in folder")
                 }
-                .buttonStyle(.borderless)
-                .help("Open in folder")
+                .foregroundStyle(.secondary)
             }
 
             if isExpanded {
@@ -583,7 +602,13 @@ private struct RecordingHistoryRow: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.vertical, isExpanded ? 4 : 0)
+        .padding(8)
+        .background {
+            if isExpanded {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.regularMaterial)
+            }
+        }
         .animation(.easeInOut(duration: 0.18), value: isExpanded)
     }
 }
@@ -652,11 +677,7 @@ private struct RecordingMiniPlayer: View {
             }
         }
         .padding(8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.4), lineWidth: 1)
-        }
+        .recorderGlassSurface(cornerRadius: 9, interactive: true)
     }
 }
 
@@ -692,11 +713,12 @@ private struct RenameRecordingSheet: View {
                 Button("Cancel") {
                     viewModel.cancelRename()
                 }
+                .recorderSecondaryButtonStyle()
                 Spacer()
                 Button("Rename") {
                     viewModel.confirmRename()
                 }
-                .buttonStyle(.borderedProminent)
+                .recorderPrimaryButtonStyle()
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -746,6 +768,7 @@ private struct PendingRecordingSheet: View {
                 } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .recorderSecondaryButtonStyle()
                 .disabled(viewModel.isSavingPendingRecording)
 
                 Spacer()
@@ -753,9 +776,9 @@ private struct PendingRecordingSheet: View {
                 Button {
                     viewModel.savePendingRecording()
                 } label: {
-                    Text(viewModel.isSavingPendingRecording ? "Saving" : "Save")
+                    Label(viewModel.isSavingPendingRecording ? "Saving" : "Save", systemImage: "checkmark")
                 }
-                .buttonStyle(.borderedProminent)
+                .recorderPrimaryButtonStyle()
                 .keyboardShortcut(.defaultAction)
                 .disabled(viewModel.isSavingPendingRecording)
             }

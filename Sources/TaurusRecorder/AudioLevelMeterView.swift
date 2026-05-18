@@ -20,7 +20,7 @@ struct AudioLevelMeterView: View {
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(Color(nsColor: .quaternaryLabelColor))
+                        .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.65))
                     RoundedRectangle(cornerRadius: 5)
                         .fill(meterColor)
                         .frame(width: max(4, proxy.size.width * CGFloat(reading.normalizedLevel)))
@@ -30,6 +30,8 @@ struct AudioLevelMeterView: View {
             .frame(height: 14)
             .accessibilityLabel(statusText)
         }
+        .padding(14)
+        .recorderGlassSurface(cornerRadius: 16, interactive: true)
     }
 
     private var meterColor: Color {

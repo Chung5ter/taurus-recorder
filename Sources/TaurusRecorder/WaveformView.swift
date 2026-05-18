@@ -34,16 +34,12 @@ struct WaveformView: View {
                     var path = Path()
                     path.move(to: CGPoint(x: x, y: minY))
                     path.addLine(to: CGPoint(x: x, y: maxY))
-                    context.stroke(path, with: .color(.accentColor), lineWidth: max(columnWidth, 1))
+                    context.stroke(path, with: .color(waveformColor), lineWidth: max(columnWidth, 1))
                 }
             }
             .frame(height: 150)
-            .recorderGlassSurface(cornerRadius: 12)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-            }
+            .padding(10)
+            .recorderGlassSurface(cornerRadius: 16, interactive: true)
         }
     }
 
@@ -63,5 +59,9 @@ struct WaveformView: View {
             path.addLine(to: CGPoint(x: x, y: size.height * 0.66))
             context.stroke(path, with: .color(Color(nsColor: .separatorColor).opacity(0.45)), lineWidth: 1)
         }
+    }
+
+    private var waveformColor: Color {
+        isActive ? .accentColor : Color(nsColor: .secondaryLabelColor)
     }
 }

@@ -37,6 +37,32 @@ struct PendingRecording: Equatable, Sendable {
     }
 }
 
+struct LiveVisualFrame: Equatable, Sendable {
+    let meterReading: MeterReading
+    let waveformPoints: [WaveformPoint]
+
+    static let empty = LiveVisualFrame(meterReading: .silence, waveformPoints: [])
+}
+
+@MainActor
+final class LiveVisualStore: ObservableObject {
+    @Published private(set) var frame: LiveVisualFrame = .empty
+
+    func update(meterReading: MeterReading, waveformPoints: [WaveformPoint]?) {
+        frame = LiveVisualFrame(
+            meterReading: meterReading,
+            waveformPoints: waveformPoints ?? frame.waveformPoints
+        )
+    }
+
+    func reset(clearWaveform: Bool) {
+        frame = LiveVisualFrame(
+            meterReading: .silence,
+            waveformPoints: clearWaveform ? [] : frame.waveformPoints
+        )
+    }
+}
+
 enum PermissionSettingsDestination: Hashable {
     case systemAudioRecording
 }
@@ -97,8 +123,6 @@ final class RecorderViewModel: ObservableObject {
         }
     }
     @Published var availableCaptureApps: [AvailableCaptureApp] = []
-    @Published var meterReading: MeterReading = .silence
-    @Published var waveformPoints: [WaveformPoint] = []
     @Published var errorMessage: String?
     @Published var permissionIssue: PermissionIssue?
     @Published var lastSavedURL: URL?
@@ -116,6 +140,7 @@ final class RecorderViewModel: ObservableObject {
     @Published var playbackDuration: TimeInterval = 0
     @Published var playbackErrorMessage: String?
 
+    let visualStore = LiveVisualStore()
     let permissionMessage: String
 
     private let recorder: AudioRecorder
@@ -202,7 +227,19 @@ final class RecorderViewModel: ObservableObject {
         if !canStop {
             return "Ready to record \(captureTargetStatusName)"
         }
-        return meterReading.isSilent ? "No \(captureTargetStatusName) detected" : "\(captureTargetDisplayName) detected"
+        return visualStore.frame.meterReading.isSilent ? silentMeterStatusText : activeMeterStatusText
+    }
+
+    var readyMeterStatusText: String {
+        "Ready to record \(captureTargetStatusName)"
+    }
+
+    var silentMeterStatusText: String {
+        "No \(captureTargetStatusName) detected"
+    }
+
+    var activeMeterStatusText: String {
+        "\(captureTargetDisplayName) detected"
     }
 
     var defaultPreviewName: String {
@@ -288,7 +325,7 @@ final class RecorderViewModel: ObservableObject {
         recordingStartedAt = nil
         accumulatedElapsed = 0
         elapsedTime = 0
-        waveformPoints = []
+        visualStore.reset(clearWaveform: true)
         activeSuggestedURL = nil
         let recorder = recorder
         Task {
@@ -555,7 +592,7 @@ final class RecorderViewModel: ObservableObject {
 
                     showSavedConfirmation(for: destinationURL)
                     clearPendingRecording()
-                    waveformPoints = []
+                    visualStore.reset(clearWaveform: true)
                     refreshHistory()
                 } catch {
                     errorMessage = error.localizedDescription
@@ -576,7 +613,7 @@ final class RecorderViewModel: ObservableObject {
         }
         try? FileManager.default.removeItem(at: pendingRecording.temporaryURL)
         clearPendingRecording()
-        waveformPoints = []
+        visualStore.reset(clearWaveform: true)
     }
 
     func refreshHistory() {
@@ -634,7 +671,7 @@ final class RecorderViewModel: ObservableObject {
             errorMessage = nil
             permissionIssue = nil
             pendingRecording = nil
-            waveformPoints = []
+            visualStore.reset(clearWaveform: true)
             accumulatedElapsed = 0
             elapsedTime = 0
             pendingDuration = 0
@@ -882,19 +919,15 @@ final class RecorderViewModel: ObservableObject {
                 guard let self else { return }
                 self.state = newState
                 if newState == .idle {
-                    self.meterReading = .silence
+                    self.visualStore.reset(clearWaveform: false)
                     self.startMonitoring()
                 }
             }
         }
-        recorder.onMeterReading = { [weak self] reading in
+        recorder.onVisualUpdate = { [weak self] reading, points in
             Task { @MainActor in
-                self?.meterReading = reading
-            }
-        }
-        recorder.onWaveform = { [weak self] points in
-            Task { @MainActor in
-                self?.waveformPoints = points
+                guard let self else { return }
+                self.visualStore.update(meterReading: reading, waveformPoints: points)
             }
         }
         recorder.onError = { [weak self] message in

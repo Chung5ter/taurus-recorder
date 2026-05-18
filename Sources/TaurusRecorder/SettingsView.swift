@@ -59,11 +59,13 @@ struct SettingsView: View {
                         } label: {
                             Label("Choose", systemImage: "folder")
                         }
+                        .recorderSecondaryButtonStyle()
                         Button {
                             NSWorkspace.shared.open(draftSaveFolderURL)
                         } label: {
                             Label("Open", systemImage: "arrow.up.forward.app")
                         }
+                        .recorderSecondaryButtonStyle()
                     }
                 }
 
@@ -123,11 +125,13 @@ struct SettingsView: View {
                 } label: {
                     Label("Open Audio Recording Settings", systemImage: "gearshape")
                 }
+                .recorderSecondaryButtonStyle()
             }
 
             Spacer()
         }
-        .padding(8)
+        .padding(14)
+        .recorderGlassSurface(cornerRadius: 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 

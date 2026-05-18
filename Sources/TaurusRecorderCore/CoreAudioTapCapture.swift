@@ -46,14 +46,12 @@ final class CoreAudioTapCapture: @unchecked Sendable {
             formatDescription = try makeFormatDescription(streamDescription)
 
             var createdIOProcID: AudioDeviceIOProcID?
-            let capture = Unmanaged.passUnretained(self).toOpaque()
             let status = AudioDeviceCreateIOProcIDWithBlock(
                 &createdIOProcID,
                 aggregateDeviceID,
                 queue
-            ) { _, inputData, _, _, _ in
-                let instance = Unmanaged<CoreAudioTapCapture>.fromOpaque(capture).takeUnretainedValue()
-                instance.handle(inputData: inputData)
+            ) { [weak self] _, inputData, _, _, _ in
+                self?.handle(inputData: inputData)
             }
             try check(status, "create audio input callback")
             ioProcID = createdIOProcID

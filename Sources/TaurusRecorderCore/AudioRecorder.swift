@@ -6,6 +6,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
 
     public var onMeterReading: (@Sendable (MeterReading) -> Void)?
     public var onWaveform: (@Sendable ([WaveformPoint]) -> Void)?
+    public var onVisualUpdate: (@Sendable (MeterReading, [WaveformPoint]?) -> Void)?
     public var onStateChange: (@Sendable (RecordingState) -> Void)?
     public var onError: (@Sendable (String) -> Void)?
     public var onFinishedSaving: (@Sendable (URL) -> Void)?
@@ -301,9 +302,13 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
                         }
                         return (reading, points)
                     }
-                    onMeterReading?(visuals.0)
-                    if let points = visuals.1 {
-                        onWaveform?(points)
+                    if let onVisualUpdate {
+                        onVisualUpdate(visuals.0, visuals.1)
+                    } else {
+                        onMeterReading?(visuals.0)
+                        if let points = visuals.1 {
+                            onWaveform?(points)
+                        }
                     }
                 } catch {
                     onError?(error.localizedDescription)
