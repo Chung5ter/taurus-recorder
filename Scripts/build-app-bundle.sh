@@ -12,6 +12,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 ENCODERS_DIR="$RESOURCES_DIR/Encoders"
 LICENSES_DIR="$RESOURCES_DIR/Licenses"
+ENTITLEMENTS_PATH="$ROOT_DIR/Resources/TaurusRecorder.entitlements"
 
 cd "$ROOT_DIR"
 swift build -c release --product "$PRODUCT_NAME"
@@ -77,17 +78,15 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.2</string>
+    <string>0.2.6</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>8</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>14.2</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAudioCaptureUsageDescription</key>
     <string>Taurus Recorder captures system audio so you can save local recordings.</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Taurus Recorder can include microphone audio when you choose a microphone recording source.</string>
 </dict>
 </plist>
 PLIST
@@ -101,5 +100,5 @@ fi
 if [[ -x "$ENCODERS_DIR/lame" ]]; then
   codesign --force --options runtime --sign "$SIGN_IDENTITY" "$ENCODERS_DIR/lame" >/dev/null
 fi
-codesign --force --deep --options runtime --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null
+codesign --force --options runtime --entitlements "$ENTITLEMENTS_PATH" --sign "$SIGN_IDENTITY" "$APP_DIR" >/dev/null
 echo "$APP_DIR"

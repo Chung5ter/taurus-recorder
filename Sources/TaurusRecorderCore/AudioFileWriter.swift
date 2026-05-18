@@ -231,20 +231,6 @@ public final class AudioFileWriter: @unchecked Sendable {
 
 enum CapturedAudioSource: Comparable, Sendable {
     case computer
-    case microphone
-}
-
-extension RecordingInputMode {
-    var capturedAudioSources: Set<CapturedAudioSource> {
-        switch self {
-        case .computer:
-            [.computer]
-        case .computerAndMicrophone:
-            [.computer, .microphone]
-        case .microphone:
-            [.microphone]
-        }
-    }
 }
 
 private extension NSLock {

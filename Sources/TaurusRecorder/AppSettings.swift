@@ -16,12 +16,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    @Published var defaultInputMode: RecordingInputMode {
-        didSet {
-            UserDefaults.standard.set(defaultInputMode.rawValue, forKey: Keys.defaultInputMode)
-        }
-    }
-
     @Published var defaultInputGain: InputGain {
         didSet {
             UserDefaults.standard.set(defaultInputGain.multiplier, forKey: Keys.defaultInputGain)
@@ -48,9 +42,6 @@ final class AppSettings: ObservableObject {
                 preferred: rawFormat.flatMap(OutputFormat.init(rawValue:))
             )
         }
-        let rawInputMode = UserDefaults.standard.string(forKey: Keys.defaultInputMode)
-        defaultInputMode = rawInputMode.flatMap(RecordingInputMode.init(rawValue:)) ?? .computer
-
         if UserDefaults.standard.object(forKey: Keys.defaultInputGain) != nil {
             defaultInputGain = InputGain(multiplier: UserDefaults.standard.float(forKey: Keys.defaultInputGain))
         } else {
@@ -63,19 +54,16 @@ final class AppSettings: ObservableObject {
     func updateDefaults(
         saveFolderURL: URL,
         outputFormat: OutputFormat,
-        inputMode: RecordingInputMode,
         inputGain: InputGain
     ) {
         defaultSaveFolderURL = saveFolderURL
         defaultOutputFormat = OutputFormat.availableDefault(preferred: outputFormat)
-        defaultInputMode = inputMode
         defaultInputGain = inputGain
     }
 
     private enum Keys {
         static let defaultSaveFolderPath = "defaultSaveFolderPath"
         static let defaultOutputFormat = "defaultOutputFormat"
-        static let defaultInputMode = "defaultInputMode"
         static let defaultInputGain = "defaultInputGain"
         static let didApplyEmbeddedMP3DefaultMigration = "didApplyEmbeddedMP3DefaultMigration"
     }

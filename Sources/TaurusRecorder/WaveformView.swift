@@ -23,7 +23,7 @@ struct WaveformView: View {
                     return
                 }
 
-                let visiblePoints = Array(points.suffix(max(Int(size.width), 1)))
+                let visiblePoints = points.suffix(max(Int(size.width), 1))
                 let columnWidth = max(size.width / CGFloat(visiblePoints.count), 1)
                 let centerY = size.height / 2
 

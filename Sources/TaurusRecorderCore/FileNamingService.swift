@@ -66,7 +66,7 @@ public struct FileNamingService {
         let year = components.year ?? 0
         let month = components.month ?? 0
         let day = components.day ?? 0
-        return String(format: "%02d%02d%02d new recording ", year % 100, month, day)
+        return String(format: "%02d%02d%02d New Recording ", year % 100, month, day)
     }
 
     private func sanitizedBaseName(_ name: String?) -> String? {

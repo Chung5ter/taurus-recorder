@@ -8,8 +8,9 @@ struct TaurusRecorderApp: App {
         WindowGroup("Taurus Recorder") {
             ContentView(appSettings: appSettings)
                 .environmentObject(appSettings)
-                .frame(minWidth: 880, minHeight: 620)
+                .frame(minWidth: 840, minHeight: 600)
         }
+        .defaultSize(width: 840, height: 600)
         .windowResizability(.contentMinSize)
 
         Settings {

@@ -20,7 +20,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("Accelerate"),
                 .linkedFramework("AVFoundation"),
-                .linkedFramework("ScreenCaptureKit"),
+                .linkedFramework("CoreAudio"),
                 .linkedFramework("AppKit")
             ]
         ),
@@ -32,7 +32,8 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("SwiftUI"),
-                .linkedFramework("AppKit")
+                .linkedFramework("AppKit"),
+                .linkedFramework("AVFoundation")
             ]
         ),
         .executableTarget(

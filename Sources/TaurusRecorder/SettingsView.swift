@@ -99,6 +99,9 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Taurus Recorder")
                     .font(.title2.weight(.semibold))
+                Text(versionText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 Text("© \(String(Calendar.current.component(.year, from: Date()))) Jee Hoon Chung (정지훈)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -112,13 +115,13 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Permissions")
                     .font(.headline)
-                Text("Computer audio capture uses macOS Screen & System Audio Recording permission. Taurus Recorder does not save screen video.")
+                Text("Computer audio capture uses macOS System Audio Recording Only permission.")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
-                    permissionHelper.openScreenRecordingSettings()
+                    permissionHelper.openSystemAudioRecordingSettings()
                 } label: {
-                    Label("Open Screen Recording Settings", systemImage: "gearshape")
+                    Label("Open Audio Recording Settings", systemImage: "gearshape")
                 }
             }
 
@@ -126,6 +129,22 @@ struct SettingsView: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var versionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        switch (version, build) {
+        case let (version?, build?) where !version.isEmpty && !build.isEmpty:
+            return "Version \(version) (\(build))"
+        case let (version?, _) where !version.isEmpty:
+            return "Version \(version)"
+        case let (_, build?) where !build.isEmpty:
+            return "Build \(build)"
+        default:
+            return "Version unavailable"
+        }
     }
 
     private func loadDraftFromSettings() {

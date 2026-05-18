@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 import TaurusRecorderCore
 
@@ -37,13 +38,23 @@ struct PendingRecording: Equatable, Sendable {
 }
 
 enum PermissionSettingsDestination: Hashable {
-    case screenRecording
-    case microphone
+    case systemAudioRecording
 }
 
 struct PermissionIssue: Equatable {
     let message: String
     let destinations: Set<PermissionSettingsDestination>
+}
+
+struct AvailableCaptureApp: Identifiable, Equatable, Sendable {
+    let bundleIdentifier: String
+    let displayName: String
+
+    var id: String { bundleIdentifier }
+
+    var captureTarget: AudioCaptureTarget {
+        .application(bundleIdentifier: bundleIdentifier, displayName: displayName)
+    }
 }
 
 @MainActor
@@ -69,13 +80,6 @@ final class RecorderViewModel: ObservableObject {
             }
         }
     }
-    @Published var inputMode: RecordingInputMode = .computer {
-        didSet {
-            if appSettings.defaultInputMode != inputMode {
-                appSettings.defaultInputMode = inputMode
-            }
-        }
-    }
     @Published var inputGain: InputGain = .unity {
         didSet {
             if appSettings.defaultInputGain != inputGain {
@@ -84,17 +88,33 @@ final class RecorderViewModel: ObservableObject {
             recorder.updateInputGain(inputGain)
         }
     }
+    @Published var captureTarget: AudioCaptureTarget = .allComputerAudio {
+        didSet {
+            guard oldValue != captureTarget else {
+                return
+            }
+            startMonitoring()
+        }
+    }
+    @Published var availableCaptureApps: [AvailableCaptureApp] = []
     @Published var meterReading: MeterReading = .silence
     @Published var waveformPoints: [WaveformPoint] = []
     @Published var errorMessage: String?
     @Published var permissionIssue: PermissionIssue?
     @Published var lastSavedURL: URL?
+    @Published var isMonitoringStarting = false
+    @Published var isStartingRecording = false
     @Published var recordingHistory: [RecordingHistoryItem] = []
     @Published var pendingRecording: PendingRecording?
     @Published var pendingFileName = ""
     @Published var isSavingPendingRecording = false
     @Published var renameTarget: RecordingHistoryItem?
     @Published var renameFileName = ""
+    @Published var playbackItemID: URL?
+    @Published var isPlaybackPlaying = false
+    @Published var playbackElapsed: TimeInterval = 0
+    @Published var playbackDuration: TimeInterval = 0
+    @Published var playbackErrorMessage: String?
 
     let permissionMessage: String
 
@@ -109,7 +129,12 @@ final class RecorderViewModel: ObservableObject {
     private var activeFormat: OutputFormat = .m4a
     private var pendingDuration: TimeInterval = 0
     private var saveConfirmationTask: Task<Void, Never>?
-    private var isStartingRecording = false
+    private var monitoringTask: Task<Void, Never>?
+    private var monitoringRequestID = UUID()
+    private var playbackPlayer: AVPlayer?
+    private var playbackTimeObserver: Any?
+    private var playbackEndObserver: (any NSObjectProtocol)?
+    private var playbackDurationTask: Task<Void, Never>?
 
     init(appSettings: AppSettings, recorder: AudioRecorder = AudioRecorder()) {
         self.recorder = recorder
@@ -117,9 +142,9 @@ final class RecorderViewModel: ObservableObject {
         self.permissionMessage = permissionHelper.onboardingMessage
         self.saveFolderURL = appSettings.defaultSaveFolderURL
         self.outputFormat = OutputFormat.availableDefault(preferred: appSettings.defaultOutputFormat)
-        self.inputMode = appSettings.defaultInputMode
         self.inputGain = appSettings.defaultInputGain
         bindRecorder()
+        refreshAvailableCaptureApps()
         refreshHistory()
     }
 
@@ -133,7 +158,7 @@ final class RecorderViewModel: ObservableObject {
             "Stop"
         case .saving:
             "Saving"
-        default:
+        case .idle, .monitoring, .error:
             "Record"
         }
     }
@@ -169,16 +194,46 @@ final class RecorderViewModel: ObservableObject {
         formatDuration(elapsedTime)
     }
 
+    var playbackProgress: Double {
+        PlaybackTimeline(duration: playbackDuration).progress(at: playbackElapsed)
+    }
+
     var meterStatusText: String {
         if !canStop {
-            return "Ready to record \(inputMode.displayName.lowercased())"
+            return "Ready to record \(captureTargetStatusName)"
         }
-        let source = inputMode.displayName.lowercased()
-        return meterReading.isSilent ? "No \(source) audio detected" : "\(inputMode.displayName) audio detected"
+        return meterReading.isSilent ? "No \(captureTargetStatusName) detected" : "\(captureTargetDisplayName) detected"
     }
 
     var defaultPreviewName: String {
         "\(fileNamingService.defaultBaseName())01.\(outputFormat.fileExtension)"
+    }
+
+    private var captureTargetStatusName: String {
+        switch captureTarget {
+        case .allComputerAudio:
+            "computer audio"
+        case .application(_, let displayName):
+            "\(displayName) audio"
+        }
+    }
+
+    private var captureTargetDisplayName: String {
+        switch captureTarget {
+        case .allComputerAudio:
+            "Computer audio"
+        case .application(_, let displayName):
+            "\(displayName) audio"
+        }
+    }
+
+    var captureTargetOptions: [AudioCaptureTarget] {
+        var options: [AudioCaptureTarget] = [.allComputerAudio]
+        options.append(contentsOf: availableCaptureApps.map(\.captureTarget))
+        if !options.contains(captureTarget) {
+            options.append(captureTarget)
+        }
+        return options
     }
 
     func formatDuration(_ duration: TimeInterval) -> String {
@@ -195,7 +250,7 @@ final class RecorderViewModel: ObservableObject {
             stop()
         case .saving:
             break
-        default:
+        case .idle, .monitoring, .error:
             startRecording()
         }
     }
@@ -220,8 +275,11 @@ final class RecorderViewModel: ObservableObject {
         }
         recordingStartedAt = nil
 
+        let recorder = recorder
         Task {
-            await recorder.stopRecording()
+            await Task.detached(priority: .userInitiated) {
+                await recorder.stopRecording()
+            }.value
         }
     }
 
@@ -232,8 +290,11 @@ final class RecorderViewModel: ObservableObject {
         elapsedTime = 0
         waveformPoints = []
         activeSuggestedURL = nil
+        let recorder = recorder
         Task {
-            await recorder.cancelRecording()
+            await Task.detached(priority: .userInitiated) {
+                await recorder.cancelRecording()
+            }.value
         }
     }
 
@@ -257,6 +318,64 @@ final class RecorderViewModel: ObservableObject {
 
     func openRecording(_ item: RecordingHistoryItem) {
         NSWorkspace.shared.open(item.url)
+    }
+
+    func showPlayback(for item: RecordingHistoryItem) {
+        if playbackItemID == item.id {
+            resetPlayback(clearSelection: true)
+            return
+        }
+
+        loadPlayback(item, shouldPlay: false)
+    }
+
+    func togglePlayback(for item: RecordingHistoryItem) {
+        if playbackItemID != item.id || playbackPlayer == nil {
+            loadPlayback(item, shouldPlay: true)
+            return
+        }
+
+        guard let playbackPlayer else {
+            return
+        }
+
+        if isPlaybackPlaying {
+            playbackPlayer.pause()
+            isPlaybackPlaying = false
+        } else {
+            if playbackDuration > 0 && playbackElapsed >= playbackDuration - 0.15 {
+                seekPlayback(to: 0)
+            }
+            playbackPlayer.play()
+            isPlaybackPlaying = true
+        }
+    }
+
+    func skipPlayback(by seconds: TimeInterval) {
+        guard playbackPlayer != nil else {
+            return
+        }
+
+        let targetTime: TimeInterval
+        if playbackDuration > 0 {
+            targetTime = PlaybackTimeline(duration: playbackDuration).time(afterSkipping: seconds, from: playbackElapsed)
+        } else {
+            targetTime = max(0, playbackElapsed + seconds)
+        }
+        seekPlayback(to: targetTime)
+    }
+
+    func seekPlayback(toProgress progress: Double) {
+        guard playbackPlayer != nil else {
+            return
+        }
+
+        let targetTime = PlaybackTimeline(duration: playbackDuration).time(atProgress: progress)
+        seekPlayback(to: targetTime)
+    }
+
+    func playbackControlSystemImage(for item: RecordingHistoryItem) -> String {
+        playbackItemID == item.id && isPlaybackPlaying ? "pause.fill" : "play.fill"
     }
 
     func revealRecording(_ item: RecordingHistoryItem) {
@@ -290,6 +409,9 @@ final class RecorderViewModel: ObservableObject {
                 if FileManager.default.fileExists(atPath: destination.path) {
                     throw RecorderError.writerFailed("A recording with that name already exists.")
                 }
+                if playbackItemID == renameTarget.id {
+                    resetPlayback(clearSelection: true)
+                }
                 try FileManager.default.moveItem(at: renameTarget.url, to: destination)
             }
 
@@ -308,6 +430,9 @@ final class RecorderViewModel: ObservableObject {
 
     func deleteRecording(_ item: RecordingHistoryItem) {
         do {
+            if playbackItemID == item.id {
+                resetPlayback(clearSelection: true)
+            }
             try FileManager.default.removeItem(at: item.url)
             refreshHistory()
         } catch {
@@ -316,16 +441,70 @@ final class RecorderViewModel: ObservableObject {
     }
 
     func openScreenRecordingSettings() {
-        permissionHelper.openScreenRecordingSettings()
+        permissionHelper.openSystemAudioRecordingSettings()
     }
 
-    func openMicrophoneSettings() {
-        permissionHelper.openMicrophoneSettings()
+    func startMonitoring() {
+        guard state != .recording,
+              state != .paused,
+              state != .saving else {
+            return
+        }
+
+        errorMessage = nil
+        permissionIssue = nil
+
+        monitoringTask?.cancel()
+        let settings = captureSettings
+        let requestID = UUID()
+        monitoringRequestID = requestID
+        isMonitoringStarting = true
+        let recorder = recorder
+        monitoringTask = Task { [weak self, recorder] in
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try await recorder.startMonitoring(captureSettings: settings)
+                }.value
+            } catch {
+                await MainActor.run {
+                    self?.present(error)
+                }
+            }
+            await MainActor.run {
+                if self?.monitoringRequestID == requestID {
+                    self?.isMonitoringStarting = false
+                }
+            }
+        }
+    }
+
+    func refreshAvailableCaptureApps() {
+        let currentBundleIdentifier = Bundle.main.bundleIdentifier
+        let appsByBundleIdentifier = Dictionary(
+            grouping: NSWorkspace.shared.runningApplications.compactMap { application -> AvailableCaptureApp? in
+                guard application.activationPolicy == .regular,
+                      let bundleIdentifier = application.bundleIdentifier,
+                      bundleIdentifier != currentBundleIdentifier else {
+                    return nil
+                }
+                let displayName = application.localizedName ?? bundleIdentifier
+                return AvailableCaptureApp(bundleIdentifier: bundleIdentifier, displayName: displayName)
+            },
+            by: \.bundleIdentifier
+        )
+
+        availableCaptureApps = appsByBundleIdentifier.values
+            .compactMap { apps in
+                apps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }.first
+            }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
     }
 
     func applyDefaultsFromSettings() {
         switch state {
-        case .idle, .error:
+        case .idle, .monitoring, .error:
             break
         case .recording, .paused, .saving:
             return
@@ -337,9 +516,6 @@ final class RecorderViewModel: ObservableObject {
         let availableDefaultFormat = OutputFormat.availableDefault(preferred: appSettings.defaultOutputFormat)
         if outputFormat != availableDefaultFormat {
             outputFormat = availableDefaultFormat
-        }
-        if inputMode != appSettings.defaultInputMode {
-            inputMode = appSettings.defaultInputMode
         }
         if inputGain != appSettings.defaultInputGain {
             inputGain = appSettings.defaultInputGain
@@ -427,10 +603,18 @@ final class RecorderViewModel: ObservableObject {
             )
         }
         .sorted { $0.modifiedAt > $1.modifiedAt }
+
+        if let playbackItemID,
+           !recordingHistory.contains(where: { $0.id == playbackItemID }) {
+            resetPlayback(clearSelection: true)
+        }
     }
 
     private func startRecording() {
         guard !isStartingRecording else {
+            return
+        }
+        guard !isMonitoringStarting else {
             return
         }
 
@@ -454,23 +638,37 @@ final class RecorderViewModel: ObservableObject {
             accumulatedElapsed = 0
             elapsedTime = 0
             pendingDuration = 0
-            recordingStartedAt = Date()
             isStartingRecording = true
-            startTimer()
+            monitoringTask?.cancel()
+            let settings = captureSettings
+            let recorder = recorder
+            resetPlayback(clearSelection: true)
 
-            Task {
+            Task { [weak self, recorder] in
                 do {
-                    try await recorder.startRecording(
-                        outputURL: temporaryURL,
-                        format: recordingFormat,
-                        captureSettings: captureSettings
-                    )
-                    isStartingRecording = false
+                    try await Task.detached(priority: .userInitiated) {
+                        try await recorder.startRecording(
+                            outputURL: temporaryURL,
+                            format: recordingFormat,
+                            captureSettings: settings
+                        )
+                    }.value
+                    await MainActor.run {
+                        guard let self else { return }
+                        self.recordingStartedAt = Date()
+                        self.startTimer()
+                        self.isStartingRecording = false
+                    }
                 } catch {
-                    timerTask?.cancel()
-                    recordingStartedAt = nil
-                    isStartingRecording = false
-                    present(error)
+                    await MainActor.run {
+                        self?.timerTask?.cancel()
+                        self?.recordingStartedAt = nil
+                        self?.accumulatedElapsed = 0
+                        self?.elapsedTime = 0
+                        self?.pendingDuration = 0
+                        self?.isStartingRecording = false
+                        self?.present(error)
+                    }
                     try? FileManager.default.removeItem(at: temporaryURL)
                 }
             }
@@ -537,7 +735,7 @@ final class RecorderViewModel: ObservableObject {
     }
 
     private var captureSettings: AudioCaptureSettings {
-        AudioCaptureSettings(inputMode: inputMode, inputGain: inputGain)
+        AudioCaptureSettings(target: captureTarget, inputGain: inputGain)
     }
 
     private func clearPendingRecording() {
@@ -565,10 +763,128 @@ final class RecorderViewModel: ObservableObject {
         }
     }
 
+    private func loadPlayback(_ item: RecordingHistoryItem, shouldPlay: Bool) {
+        resetPlayback(clearSelection: false)
+        playbackItemID = item.id
+        playbackElapsed = 0
+        playbackDuration = 0
+        playbackErrorMessage = nil
+
+        let asset = AVURLAsset(url: item.url)
+        let playerItem = AVPlayerItem(asset: asset)
+        let player = AVPlayer(playerItem: playerItem)
+        playbackPlayer = player
+
+        playbackTimeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self, weak player] time in
+            Task { @MainActor in
+                guard let self, self.playbackItemID == item.id else {
+                    return
+                }
+                self.playbackElapsed = Self.finiteSeconds(time.seconds)
+                if let duration = player?.currentItem?.duration.seconds,
+                   duration.isFinite,
+                   duration > 0 {
+                    self.playbackDuration = duration
+                }
+            }
+        }
+
+        playbackEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.playbackItemID == item.id else {
+                    return
+                }
+                self.isPlaybackPlaying = false
+                if self.playbackDuration > 0 {
+                    self.playbackElapsed = self.playbackDuration
+                }
+            }
+        }
+
+        playbackDurationTask = Task { [weak self] in
+            do {
+                let duration = try await asset.load(.duration)
+                await MainActor.run {
+                    guard let self, self.playbackItemID == item.id else {
+                        return
+                    }
+                    self.playbackDuration = Self.finiteSeconds(duration.seconds)
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.playbackItemID == item.id else {
+                        return
+                    }
+                    self.playbackErrorMessage = error.localizedDescription
+                }
+            }
+        }
+
+        if shouldPlay {
+            player.play()
+            isPlaybackPlaying = true
+        }
+    }
+
+    private func seekPlayback(to seconds: TimeInterval) {
+        let target = max(0, seconds)
+        playbackElapsed = target
+        playbackPlayer?.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    private func resetPlayback(clearSelection: Bool) {
+        playbackDurationTask?.cancel()
+        playbackDurationTask = nil
+
+        if let playbackTimeObserver, let playbackPlayer {
+            playbackPlayer.removeTimeObserver(playbackTimeObserver)
+        }
+        playbackTimeObserver = nil
+
+        if let playbackEndObserver {
+            NotificationCenter.default.removeObserver(playbackEndObserver)
+        }
+        playbackEndObserver = nil
+
+        playbackPlayer?.pause()
+        playbackPlayer = nil
+        isPlaybackPlaying = false
+        playbackElapsed = 0
+        playbackDuration = 0
+        playbackErrorMessage = nil
+
+        if clearSelection {
+            playbackItemID = nil
+        }
+    }
+
+    private static func finiteSeconds(_ seconds: TimeInterval) -> TimeInterval {
+        guard seconds.isFinite, seconds > 0 else {
+            return 0
+        }
+        return seconds
+    }
+
     private func bindRecorder() {
         recorder.onStateChange = { [weak self] newState in
             Task { @MainActor in
-                self?.state = newState
+                guard let self else { return }
+                self.state = newState
+                if newState == .idle {
+                    self.meterReading = .silence
+                    self.startMonitoring()
+                }
             }
         }
         recorder.onMeterReading = { [weak self] reading in
@@ -619,18 +935,10 @@ final class RecorderViewModel: ObservableObject {
         }
 
         switch recorderError {
-        case .screenRecordingPermissionNeeded:
-            var destinations: Set<PermissionSettingsDestination> = [.screenRecording]
-            var message = "Computer audio requires Screen & System Audio Recording permission. Your screenshot shows it may already be enabled; if so, toggle Taurus Recorder off and back on, then quit and reopen the app."
-            if inputMode.capturesMicrophone {
-                destinations.insert(.microphone)
-                message += " Computer + Mic also requires Microphone permission."
-            }
-            return PermissionIssue(message: message, destinations: destinations)
-        case .microphonePermissionNeeded:
+        case .systemAudioRecordingPermissionNeeded:
             return PermissionIssue(
-                message: "Mic recording requires Microphone permission for Taurus Recorder.",
-                destinations: [.microphone]
+                message: "Computer audio requires System Audio Recording Only permission. If it is already enabled, toggle Taurus Recorder off and back on, then quit and reopen the app.",
+                destinations: [.systemAudioRecording]
             )
         default:
             return nil

@@ -24,6 +24,7 @@ struct AudioLevelMeterView: View {
                     RoundedRectangle(cornerRadius: 5)
                         .fill(meterColor)
                         .frame(width: max(4, proxy.size.width * CGFloat(reading.normalizedLevel)))
+                        .animation(.linear(duration: 1.0 / 30.0), value: reading.normalizedLevel)
                 }
             }
             .frame(height: 14)

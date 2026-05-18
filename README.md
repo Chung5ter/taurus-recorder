@@ -1,6 +1,6 @@
 # Taurus Recorder
 
-Native SwiftUI macOS app for recording system audio with ScreenCaptureKit.
+Native SwiftUI macOS app for recording system audio with Core Audio process taps.
 
 System recording programs for Mac exist, but they always felt somewhat complex because they had such rich features. This program is extremely bare bones for super simple use.
 
@@ -12,16 +12,17 @@ DMG download: [v0.2.2 release](https://github.com/Chung5ter/taurus-recorder/rele
 
 ## What It Includes
 
-- Computer audio, microphone audio, or combined computer + microphone capture through `ScreenCaptureKit`.
+- Computer audio capture through Core Audio process taps.
 - Audio writing through `AVAssetWriter`.
-- Live RMS/peak audio meter before and during recording.
+- Throttled RMS/peak audio meter before and during recording.
 - Rolling waveform from the same captured audio buffers used for recording.
-- Input gain control from 1/3x to 3x with a live dB label.
-- Default English filenames like `260507 new recording 01.m4a`, incremented without overwriting.
-- Save folder selector, post-stop save/delete confirmation, M4A/MP3/WAV output selector, and recording source selector.
+- App-specific audio capture, so one running app can be recorded without picking up other app audio.
+- Notched input gain control from 1/3x to 3x with a live dB label.
+- Default English filenames like `260507 New Recording 01.m4a`, incremented without overwriting.
+- Save folder selector, post-stop save/delete confirmation, M4A/MP3/WAV output selector, and in-app playback mini-player.
 - Native Settings panel available from the app menu or `Command + ,`.
-- Plain Screen Recording and Microphone permission guidance inside the app.
-- macOS privacy indicators only appear during active recording or pause, not while the app is idle.
+- Plain System Audio Recording Only permission guidance inside the app.
+- Core Audio monitoring runs while the app is idle so audio pickup is visible before recording.
 
 ## Build
 
@@ -51,6 +52,6 @@ swift run CoreBehaviorTests
 
 ## Notes
 
-Taurus Recorder does not save screen video. ScreenCaptureKit still requires Screen Recording permission for computer audio capture, and macOS requires Microphone permission when a microphone source is selected. Microphone capture requires macOS 15 or later.
+Taurus Recorder captures outgoing audio through Core Audio process taps and uses macOS System Audio Recording Only permission.
 
 MP3 export uses the system `afconvert` tool plus LAME because `AVAssetWriter` on macOS does not accept MP3 as an output file type. Install LAME with `brew install lame` if MP3 save fails.
